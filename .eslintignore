@@ -1,0 +1,5 @@
+coverage
+node_modules
+__benchmarks__
+cli.js
+runner.js

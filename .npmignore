@@ -1,0 +1,9 @@
+/.idea
+/.github
+/coverage
+/__tests__
+/__mocks__
+/__benchmarks__
+/jest.*
+/*.log*
+/.*
