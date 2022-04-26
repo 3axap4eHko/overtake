@@ -1,67 +1,185 @@
+import Path from 'path';
 import WorkerThreads from 'worker_threads';
+import { Event } from 'evnty';
 
-export const suites = [];
+export const NOOP = () => {};
 
-const NOOP = () => {};
+export class Perform {
+  title = '';
 
-const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏', '⠿'];
-const SPINNER_INTERVAL = 80;
+  count = 0;
 
-const ACCURACY = 6;
+  args;
 
-const renderSpinner = (index) => {
-  process.stdout.moveCursor(0, -1);
-  process.stdout.write(SPINNER[index]);
-  process.stdout.moveCursor(-3, 1);
-};
-
-export function benchmark(title, init) {
-  const suite = {
-    title,
-    current: true,
-    measures: [],
-    performs: [],
-    setup: NOOP,
-    teardown: NOOP,
-  };
-  suites.push(suite);
-  init();
-  suite.current = false;
-}
-
-export function getSuite() {
-  const suite = suites[suites.length - 1];
-  if (!suite.current) {
-    throw new Error('should be inside benchmark');
+  constructor(overtake, title, count, args) {
+    this.title = title;
+    this.count = count;
+    this.args = args;
   }
-  return suite;
 }
 
-export function setup(init) {
-  const suite = getSuite();
-  suite.setup = init;
+export class Measure {
+  title = '';
+
+  init = NOOP;
+
+  constructor(overtake, title, init = NOOP) {
+    this.title = title;
+    this.init = init;
+  }
 }
 
-export function teardown(init) {
-  const suite = getSuite();
-  suite.teardown = init;
+export class Suite {
+  title = '';
+
+  setup = NOOP;
+
+  measures = [];
+
+  performs = [];
+
+  teardown = NOOP;
+
+  #title = '';
+
+  #init = NOOP;
+
+  #overtake = null;
+
+  constructor(overtake, title, init = NOOP) {
+    this.#overtake = overtake;
+    this.title = title;
+    this.#init = init;
+  }
+
+  async init() {
+    const unsubscribes = [
+      this.#overtake.onSetupRegister.on((setup) => (this.setup = setup)),
+      this.#overtake.onMeasureRegister.on((measure) => this.measures.push(measure)),
+      this.#overtake.onPerformRegister.on((perform) => this.performs.push(perform)),
+      this.#overtake.onTeardownRegister.on((teardown) => (this.teardown = teardown)),
+    ];
+    await this.#init();
+    unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }
 }
 
-export function measure(title, init) {
-  const suite = getSuite();
-  suite.measures.push({ title, init });
+export class Script {
+  onLoad = new Event();
+
+  filename = '';
+
+  suites = [];
+
+  constructor(filename) {
+    this.filename = filename;
+  }
 }
 
-export function perform(title, count, args) {
-  const suite = getSuite();
-  suite.performs.push({ title, count, args });
+export class Overtake {
+  onLoad = new Event();
+
+  onRun = new Event();
+
+  onComplete = new Event();
+
+  onScriptRegister = new Event();
+
+  onScriptStart = new Event();
+
+  onScriptComplete = new Event();
+
+  onSuiteRegister = new Event();
+
+  onSuiteStart = new Event();
+
+  onSuiteComplete = new Event();
+
+  onSetupRegister = new Event();
+
+  onTeardownRegister = new Event();
+
+  onMeasureRegister = new Event();
+
+  onMeasureStart = new Event();
+
+  onMeasureComplete = new Event();
+
+  onPerformRegister = new Event();
+
+  onPerformStart = new Event();
+
+  onPerformProgress = new Event();
+
+  onPerformComplete = new Event();
+
+  onReport = new Event();
+
+  scripts = [];
+
+  reporters = [];
+
+  constructor(options = {}) {
+    Object.assign(globalThis, {
+      benchmark: (title, init) => this.onSuiteRegister(new Suite(this, title, init)),
+      setup: (init) => this.onSetupRegister(init),
+      teardown: (init) => this.onTeardownRegister(init),
+      measure: (title, init) => this.onMeasureRegister(new Measure(this, title, init)),
+      perform: (title, count, args) => this.onPerformRegister(new Perform(this, title, count, args)),
+      reporter: (reporter) => this.reporters.push(reporter(this)),
+    });
+  }
+
+  async load(files) {
+    this.onLoad(this);
+    for (const file of files) {
+      const filename = Path.resolve(file);
+      const script = new Script(filename);
+      const unsubscribe = this.onSuiteRegister.on((suite) => {
+        script.suites.push(suite);
+      });
+      await import(filename);
+      unsubscribe();
+      this.scripts.push(script);
+      this.onScriptRegister(script);
+    }
+  }
+
+  async run() {
+    this.onRun();
+    for (const script of this.scripts) {
+      this.onScriptStart(script);
+      for (const suite of script.suites) {
+        await suite.init().catch((e) => console.error(e));
+        this.onSuiteStart(suite);
+        for (const measure of suite.measures) {
+          this.onMeasureStart(measure);
+          for (const perform of suite.performs) {
+            this.onPerformStart(perform);
+            const result = await runWorker(
+              {
+                setup: suite.setup,
+                teardown: suite.teardown,
+                init: measure.init,
+                count: perform.count,
+                args: perform.args,
+              },
+              this.onPerformProgress
+            );
+            this.onPerformComplete(perform);
+            this.onReport(result);
+          }
+          this.onMeasureComplete(perform);
+        }
+        this.onSuiteComplete(perform);
+      }
+      this.onScriptComplete(perform);
+    }
+    this.onComplete(this);
+  }
 }
 
-export function formatFloat(value, digits = ACCURACY) {
-  return parseFloat(value.toFixed(digits));
-}
-
-export async function runWorker({ args, count, ...options }) {
+export async function runWorker({ args, count, ...options }, onProgress) {
   const setupCode = options.setup.toString();
   const teardownCode = options.teardown.toString();
   const initCode = options.init.toString();
@@ -72,63 +190,18 @@ export async function runWorker({ args, count, ...options }) {
     count,
     args,
   });
-  let i = 0;
-  const spinnerSize = SPINNER.length - 1;
-
-  const timerId = setInterval(() => renderSpinner(i++ % spinnerSize), SPINNER_INTERVAL);
 
   const worker = new WorkerThreads.Worker(new URL('runner.js', import.meta.url), { argv: [params] });
   return new Promise((resolve) => {
-    worker.on('message', resolve);
-    worker.on('error', (error) => resolve({ success: false, error: error.message }));
-  }).finally((result) => {
-    clearInterval(timerId);
-    renderSpinner(spinnerSize);
-
-    return result;
-  });
-}
-
-export async function runner(suite) {
-  console.group(`\nStart ${suite.title} benchmark`);
-
-  for (let measureIdx = 0; measureIdx < suite.measures.length; measureIdx++) {
-    const currentMeasure = suite.measures[measureIdx];
-    const reports = {};
-    console.group(`\n  Measuring performance of ${currentMeasure.title}`);
-    for (let performIdx = 0; performIdx < suite.performs.length; performIdx++) {
-      const currentPerform = suite.performs[performIdx];
-      const report = await runWorker({
-        setup: suite.setup,
-        teardown: suite.teardown,
-        init: currentMeasure.init,
-        count: currentPerform.count,
-        args: currentPerform.args,
-      });
-      reports[currentPerform.title] = { title: perform.title, report };
-      if (report.success) {
-        reports[currentPerform.title] = {
-          Count: currentPerform.count,
-          'Setup, ms': formatFloat(report.setup),
-          'Work, ms': formatFloat(report.work),
-          'Avg, ms': formatFloat(report.avg),
-          'Mode, ms': report.mode,
-        };
-      } else {
-        reports[`${currentPerform.title} ${currentMeasure.title}`] = {
-          Count: currentPerform.count,
-          'Setup, ms': '?',
-          'Work, ms': '?',
-          'Avg, ms': '?',
-          'Mode, ms': '?',
-          Error: report.error,
-        };
+    worker.on('message', (data) => {
+      if (data.type === 'progress') {
+        onProgress(data);
+      } else if (data.type === 'report') {
+        resolve(data);
       }
-    }
-    console.groupEnd();
-    console.table(reports);
-  }
-  console.groupEnd();
+    });
+    worker.on('error', (error) => resolve({ success: false, error: error.message }));
+  });
 }
 
 const FALSE_START = () => {
@@ -136,17 +209,23 @@ const FALSE_START = () => {
 };
 
 export async function start(input) {
-  const { setupCode, teardownCode, initCode, count, args = [[]] } = JSON.parse(input);
+  const { setupCode, teardownCode, initCode, count, reportInterval = 500, args = [[]] } = JSON.parse(input);
   const setup = Function(`return ${setupCode};`)();
   const teardown = Function(`return ${teardownCode};`)();
   const init = Function(`return ${initCode};`)();
+  const send = WorkerThreads.parentPort ? (data) => WorkerThreads.parentPort.postMessage(data) : (data) => console.log(data);
 
   let i = count;
   let done = FALSE_START;
 
   const timings = [];
   const argSize = args.length;
+
+  send({ type: 'progress', stage: 'setup' });
+  const startMark = performance.now();
   const context = await setup();
+  const setupMark = performance.now();
+
   const initArgs = [() => done()];
   if (init.length > 2) {
     initArgs.unshift(args);
@@ -154,70 +233,97 @@ export async function start(input) {
   if (init.length > 1) {
     initArgs.unshift(context);
   }
-  const startMark = performance.now();
+
+  send({ type: 'progress', stage: 'init' });
+  const initMark = performance.now();
   const action = await init(...initArgs);
-  const workMark = performance.now();
+  const initDoneMark = performance.now();
 
   try {
+    let lastCheck = performance.now();
     const loop = (resolve, reject) => {
-      const argIdx = i % argSize;
+      const idx = count - i;
+      const argIdx = idx % argSize;
       const timerId = setTimeout(reject, 10000, new Error('Timeout'));
 
       done = () => {
-        // eslint-disable-next-line
-        const elapsed = performance.now() - startTickTime;
+        const doneTick = performance.now();
+        const elapsed = doneTick - startTickTime;
         clearTimeout(timerId);
         done = FALSE_START;
         timings.push(elapsed);
-
+        if (doneTick - lastCheck > reportInterval) {
+          lastCheck = doneTick;
+          send({ type: 'progress', stage: 'cycles', progress: idx / count });
+        }
         resolve();
       };
-      const startTickTime = performance.now();
-      action(...args[argIdx], count - i);
-    };
 
+      const startTickTime = performance.now();
+      action(...args[argIdx], idx);
+    };
+    const cyclesMark = performance.now();
+
+    send({ type: 'progress', stage: 'cycles', progress: 0 });
     while (i--) {
       await new Promise(loop);
     }
-    const completeMark = performance.now();
-
+    send({ type: 'progress', stage: 'teardown' });
+    const teardownMark = performance.now();
     await teardown(context);
+    const completeMark = performance.now();
+    send({ type: 'progress', stage: 'complete', progress: (count - i) / count });
 
-    timings.sort();
+    timings.sort((a, b) => a - b);
 
-    const {
-      mode: { time: mode },
-    } = timings
-      .map((time) => parseFloat(time.toFixed(ACCURACY)))
-      .reduce((result, time) => {
-        const value = (result[time] || 0) + 1;
-        const mode = !result.mode || result.mode.value < value ? { time, value } : result.mode;
-        return { ...result, [time]: value, mode };
-      }, {});
+    const min = timings[0];
+    const max = timings[timings.length - 1];
+    const range = max - min || Number.MIN_VALUE;
+    const sum = timings.reduce((a, b) => a + b, 0);
+    const avg = sum / timings.length;
 
-    const min = timings.reduce((a, b) => Math.min(a, b), Infinity);
-    const max = timings.reduce((a, b) => Math.max(a, b), 0);
-    const avg = timings.reduce((a, b) => a + b, 0) / count;
-    const p90idx = parseInt(timings.length * 0.9, 10);
-    const p95idx = parseInt(timings.length * 0.95, 10);
-    const p99idx = parseInt(timings.length * 0.99, 10);
-    const p90 = timings[p90idx];
-    const p95 = timings[p95idx];
-    const p99 = timings[p99idx];
+    const step = range / 99 || Number.MIN_VALUE;
+    const buckets = Array(100)
+      .fill(0)
+      .map((_, idx) => [min + idx * step, 0]);
 
-    WorkerThreads.parentPort.postMessage({
+    // Calc mode O(n)
+    timings.forEach((timing, idx) => {
+      const index = Math.round((timing - min) / step);
+      buckets[index][1] += 1;
+    });
+    buckets.sort((a, b) => a[1] - b[1]);
+
+    const medIdx = Math.trunc((50 * timings.length) / 100);
+    const med = timings[medIdx];
+    const p90Idx = Math.trunc((90 * timings.length) / 100);
+    const p90 = timings[p90Idx];
+    const p95Idx = Math.trunc((95 * timings.length) / 100);
+    const p95 = timings[p95Idx];
+    const p99Idx = Math.trunc((99 * timings.length) / 100);
+    const p99 = timings[p99Idx];
+    const mode = buckets[buckets.length - 1][0];
+
+    send({
+      type: 'report',
+      success: true,
+      count: timings.length,
       min,
       max,
+      sum,
       avg,
+      med,
+      mode,
       p90,
       p95,
       p99,
-      mode,
-      setup: workMark - startMark,
-      work: completeMark - workMark,
-      success: true,
+      setup: setupMark - startMark,
+      init: initDoneMark - initMark,
+      cycles: teardownMark - cyclesMark,
+      teardown: completeMark - teardownMark,
+      total: completeMark - setupMark,
     });
   } catch (error) {
-    WorkerThreads.parentPort.postMessage({ success: false, error: error.stack });
+    send({ type: 'report', success: false, error: error.stack });
   }
 }

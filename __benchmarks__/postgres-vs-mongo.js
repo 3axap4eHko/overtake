@@ -9,6 +9,8 @@ benchmark('mongodb vs postgres', () => {
       port: 5432,
     });
     await postgres.connect();
+    await postgres.query('DROP TABLE IF EXISTS overtake');
+    await postgres.query('CREATE TABLE IF NOT EXISTS overtake ( id SERIAL not null, idx int not null, value varchar(45) NOT NULL, PRIMARY KEY (id) )');
 
     const { MongoClient } = await import('mongodb');
     const mongo = new MongoClient('mongodb://localhost', {
@@ -16,14 +18,15 @@ benchmark('mongodb vs postgres', () => {
       useUnifiedTopology: true,
     });
     await mongo.connect();
+    const db = mongo.db();
+    await db.dropCollection('overtake').catch(Boolean);
+    await db.createCollection('overtake');
 
     return { postgres, mongo };
   });
 
   measure('postgres inserts', async ({ postgres }, next) => {
     // prepare a query
-    await postgres.query('DROP TABLE IF EXISTS overtake');
-    await postgres.query('CREATE TABLE IF NOT EXISTS overtake ( id SERIAL not null, idx int not null, value varchar(45) NOT NULL, PRIMARY KEY (id) )');
     const query = 'INSERT INTO overtake(idx, value) VALUES($1, $2) RETURNING *';
 
     return (value, idx) => postgres.query(query, [idx, value]).then(next);
@@ -32,19 +35,13 @@ benchmark('mongodb vs postgres', () => {
   measure('mongodb inserts', async ({ mongo }, next) => {
     // prepare a collection
     const db = mongo.db();
-    await db.dropCollection('overtake').catch(Boolean);
-    await db.createCollection('overtake');
     const collection = db.collection('overtake');
 
     return (value, idx) => collection.insertOne({ idx, value }).then(next);
   });
 
   measure('postgres query data', async ({ postgres }, next) => {
-    const query = `
-    SELECT *
-    FROM overtake
-    WHERE value = $1
-    `;
+    const query = `SELECT * FROM overtake WHERE value = $1`;
     return (value) => postgres.query(query, [value]).then(next);
   });
 
@@ -56,6 +53,32 @@ benchmark('mongodb vs postgres', () => {
     return (value) => collection.find({ value }).toArray().then(next);
   });
 
+  measure('postgres query inserts', async ({ postgres }, next) => {
+    // prepare a query
+    const insert = 'INSERT INTO overtake(idx, value) VALUES($1, $2) RETURNING id';
+    const query = `SELECT * FROM overtake WHERE id = $1`;
+
+    return async (value, idx) => {
+      const {
+        rows: [{ id }],
+      } = await postgres.query(insert, [idx, value]);
+      await postgres.query(query, [id]);
+      next();
+    };
+  });
+
+  measure('mongodb query inserts', async ({ mongo }, next) => {
+    // prepare a collection
+    const db = mongo.db();
+    const collection = db.collection('overtake');
+
+    return async (value, idx) => {
+      const { insertedId } = await collection.insertOne({ idx, value });
+      await collection.findOne({ _id: insertedId });
+      next();
+    };
+  });
+
   measure('postgres group data', async ({ postgres }, next) => {
     const query = `
      SELECT value, COUNT(idx) as count
@@ -65,7 +88,7 @@ benchmark('mongodb vs postgres', () => {
     return () => postgres.query(query).then(next);
   });
 
-  measure('mongodb query data', async ({ mongo }, next) => {
+  measure('mongodb group data', async ({ mongo }, next) => {
     // prepare a collection
     const db = mongo.db();
     const collection = db.collection('overtake');

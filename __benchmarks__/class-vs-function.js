@@ -1,13 +1,4 @@
 benchmark('Class vs Function', () => {
-  setup(() => /(\w+)\s(\w+)/);
-
-  measure('a class declaration via "class"', (regexp, inputArgs, next) => (text) => {
-    regexp.test(text);
-    next();
-  });
-
-  perform('quick test', 10000, [['John Smith']]);
-
   measure('a class declaration via "class"', (_, __, next) => {
     return () => {
       class Class {
@@ -50,5 +41,5 @@ benchmark('Class vs Function', () => {
     };
   });
 
-  perform('Instantiation', 500000);
+  perform('Instantiation', 1000000);
 });

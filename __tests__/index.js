@@ -1,52 +1,75 @@
-import { jest } from '@jest/globals';
-import { benchmark, setup, teardown, measure, perform, suites } from '../index.js';
+import Path from 'path';
+import { expect, jest } from '@jest/globals';
+import { Overtake, NOOP, Script } from '../index.js';
+
+const TEST_BENCHMARK = '__benchmarks__/test.js';
 
 describe('Overtake test suite', () => {
-  it('should create a benchmark suite', () => {
-    expect(suites.length).toEqual(0);
+  it('Should be exported', () => {
+    expect(Overtake).toBeDefined();
+  });
 
-    const setupInit = jest.fn(() => {});
-    const teardowmInit = jest.fn(() => {});
+  it('Should create an instance and register globals', () => {
+    const overtake = new Overtake();
+    expect(overtake).toBeDefined();
+    expect(benchmark).toBeDefined();
+    expect(setup).toBeDefined();
+    expect(teardown).toBeDefined();
+    expect(measure).toBeDefined();
+    expect(perform).toBeDefined();
+    expect(reporter).toBeDefined();
+  });
 
-    const measureTitle = 'measure';
-    const measureInit = jest.fn(() => {});
+  it('Should load and run test script', async () => {
+    const overtake = new Overtake();
 
-    const performTitle = 'perform';
-    const performCount = 12345;
-    const performArgs = [['test']];
+    expect(overtake.scripts.length).toEqual(0);
 
-    const benchmarkTitle = 'benchmark';
-    const benchmarkInit = jest.fn(() => {
-      setup(setupInit);
-      measure(measureTitle, measureInit);
-      teardown(teardowmInit);
-      perform(performTitle, performCount, performArgs);
+    const benchmark = jest.spyOn(globalThis, 'benchmark');
+    const setup = jest.spyOn(globalThis, 'setup');
+    const teardown = jest.spyOn(globalThis, 'teardown');
+    const measure = jest.spyOn(globalThis, 'measure');
+    const perform = jest.spyOn(globalThis, 'perform');
+    const reporter = jest.spyOn(globalThis, 'reporter');
+
+    await overtake.load([TEST_BENCHMARK]);
+
+    expect(overtake.scripts.length).toEqual(1);
+    expect(benchmark).toHaveBeenLastCalledWith('Test', expect.any(Function));
+    expect(setup).not.toBeCalled();
+    expect(teardown).not.toBeCalled();
+    expect(measure).not.toBeCalled();
+    expect(perform).not.toBeCalled();
+    expect(reporter).not.toBeCalled();
+
+    const onReport = jest.fn();
+    const mockReporter = jest.fn((o) => {
+      o.onReport.on(onReport);
     });
+    reporter(mockReporter);
 
-    benchmark(benchmarkTitle, benchmarkInit);
-
-    expect(benchmarkInit).toHaveBeenCalledTimes(1);
-    expect(suites.length).toEqual(1);
-
-    const suite = suites[0];
-    expect(suite).toMatchObject({
-      title: benchmarkTitle,
-      current: false,
-      measures: [
+    expect(overtake).toMatchObject({
+      scripts: [
         expect.objectContaining({
-          title: measureTitle,
-          init: measureInit,
+          filename: Path.join(process.cwd(), TEST_BENCHMARK),
+          suites: [
+            expect.objectContaining({
+              title: 'Test',
+              setup: NOOP,
+              measures: [],
+              performs: [],
+              teardown: NOOP,
+            }),
+          ],
         }),
       ],
-      performs: [
-        expect.objectContaining({
-          title: performTitle,
-          count: performCount,
-          args: performArgs,
-        }),
-      ],
-      setup: setupInit,
-      teardown: teardowmInit,
     });
+
+    await overtake.run();
+    expect(setup).toBeCalled();
+    expect(teardown).toBeCalled();
+    expect(measure).toBeCalled();
+    expect(perform).toBeCalled();
+    expect(mockReporter).toBeCalled();
   });
 });

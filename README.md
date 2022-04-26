@@ -1,6 +1,6 @@
 # Overtake
 
-NodeJS performance benchmark
+Performance benchmark for NodeJS
 
 [![Build Status][github-image]][github-url]
 [![NPM version][npm-image]][npm-url]
@@ -80,6 +80,8 @@ benchmark('mongodb vs postgres', () => {
   ]);
 });
 ```
+
+Make sure you have installed used modules and run
 
 ```bash
 yarn overtake
