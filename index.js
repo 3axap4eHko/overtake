@@ -40,8 +40,6 @@ export class Suite {
 
   teardown = NOOP;
 
-  #title = '';
-
   #init = NOOP;
 
   #overtake = null;

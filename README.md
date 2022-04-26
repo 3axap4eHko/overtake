@@ -55,7 +55,7 @@ benchmark('mongodb vs postgres', () => {
     return { postgres, mongo };
   });
 
-  measure('mongodb inserts', ({ mongo }/* context */, next) => {
+  measure('mongodb inserts', ({ mongo } /* context */, next) => {
     // prepare a collection
     const database = mongo.db('overtake');
     const test = database.collection('test');
@@ -63,21 +63,19 @@ benchmark('mongodb vs postgres', () => {
     return (data) => test.insertOne(data).then(next);
   });
 
-  measure('postgres inserts', ({ postgres }/* context */, next) => {
+  measure('postgres inserts', ({ postgres } /* context */, next) => {
     // prepare a query
     const query = 'INSERT INTO overtake(value) VALUES($1) RETURNING *';
 
     return (data) => postgres.query(query, [data.value]).then(next);
   });
 
-  teardown(({ mongo, postgres }) => {
-    await postgres.end()
-    await mongo.end()
+  teardown(async ({ mongo, postgres }) => {
+    await postgres.end();
+    await mongo.end();
   });
 
-  perform('simple test', 100000, [
-    { value: 'test' },
-  ]);
+  perform('simple test', 100000, [[{ value: 'test' }]]);
 });
 ```
 
@@ -85,6 +83,12 @@ Make sure you have installed used modules and run
 
 ```bash
 yarn overtake
+```
+
+or
+
+```bash
+npx overtake
 ```
 
 Please take a look at [benchmarks](__benchmarks__) to see more examples

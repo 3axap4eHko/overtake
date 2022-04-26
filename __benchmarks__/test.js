@@ -4,6 +4,10 @@ benchmark('Test', () => {
   measure('a', async (next) => {
     return () => next();
   });
+
+  measure('a', async (next) => {
+    return () => next();
+  });
   measure('b', async (context, next) => {
     return () => next();
   });
