@@ -9,7 +9,7 @@
     "overtake": "cli.js"
   },
   "scripts": {
-    "start": "node --no-warnings ./cli.js",
+    "start": "./cli.js",
     "test": "yarn node --experimental-vm-modules $(yarn bin jest) --detectOpenHandles",
     "lint": "eslint .",
     "prepare": "husky install"

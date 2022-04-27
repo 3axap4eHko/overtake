@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --no-warnings
 
 import { Command } from 'commander';
 import { promisify } from 'util';
@@ -15,7 +15,7 @@ commands
   .argument('[files...]', 'file paths or path patterns to search benchmark scripts')
   .option('-i, --inline [inline]', 'inline code to benchmark', (value, previous) => previous.concat([value]), [])
   .option('-c, --count [count]', 'perform count for inline code', (v) => parseInt(v))
-  .action(async (patterns, { count = 100, inline }) => {
+  .action(async (patterns, { count = 1, inline }) => {
     Object.assign(globalThis, { benchmark, setup, teardown, measure, perform });
 
     const globAsync = promisify(glob);
@@ -60,18 +60,3 @@ commands.on('--help', () => {
 });
 
 commands.parse(process.argv);
-
-//
-
-//
-// (async () => {
-//   const files = await globAsync(pattern);
-//   const scripts = [];
-//   for (const file of files) {
-//     const filename = Path.resolve(file);
-//     const script = await load(filename);
-//     scripts.push(script);
-//   }
-//
-//   await run(scripts, defaultReporter);
-// })().catch((e) => console.error(e));
