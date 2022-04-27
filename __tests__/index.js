@@ -48,6 +48,6 @@ describe('Overtake test suite', () => {
     expect(testReporter).toBeCalledWith('perform', 'Y', anyFn);
     expect(testReporter).toBeCalledWith('perform', 'Z', anyFn);
 
-    expect(output).toBeCalledTimes(3 * 3);
+    expect(output).toBeCalledTimes(script.suites[0].measures.length * script.suites[0].performs.length);
   });
 });

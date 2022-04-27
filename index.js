@@ -38,13 +38,18 @@ export const benchmark = (title, fn) => {
   });
 };
 
-export const load = async (filename) => {
+export const createScript = async (filename, fn) => {
   const suites = [];
   const script = { filename, suites };
-  await overtakeContext.contextualize(script, () => import(filename));
+  await overtakeContext.contextualize(script, fn);
 
   return script;
 };
+
+export const load = async (filename) => {
+  return createScript(filename, () => import(filename));
+};
+
 const map = {
   script: '⭐ Script ',
   suite: '⇶ Suite ',
@@ -87,6 +92,7 @@ export const run = async (scripts, reporter) => {
                         med: formatFloat(result.med),
                         p95: formatFloat(result.p95),
                         p99: formatFloat(result.p99),
+                        count: result.count,
                       },
                     });
                   } else {
@@ -140,8 +146,8 @@ export async function start(input) {
   const setup = Function(`return ${setupCode};`)();
   const teardown = Function(`return ${teardownCode};`)();
   const init = Function(`return ${initCode};`)();
+  const initArgsSize = init.length;
   const send = WorkerThreads.parentPort ? (data) => WorkerThreads.parentPort.postMessage(data) : (data) => console.log(data);
-
   let i = count;
   let done = FALSE_START;
 
@@ -153,11 +159,14 @@ export async function start(input) {
   const context = await setup();
   const setupMark = performance.now();
 
-  const initArgs = [() => done()];
-  if (init.length > 2) {
+  const initArgs = [];
+  if (initArgsSize !== 0) {
+    initArgs.push(() => done());
+  }
+  if (initArgsSize > 2) {
     initArgs.unshift(args);
   }
-  if (init.length > 1) {
+  if (initArgsSize > 1) {
     initArgs.unshift(context);
   }
 
@@ -188,6 +197,9 @@ export async function start(input) {
 
       const startTickTime = performance.now();
       action(...args[argIdx], idx);
+      if (!initArgsSize) {
+        done();
+      }
     };
     const cyclesMark = performance.now();
 

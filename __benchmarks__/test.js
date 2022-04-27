@@ -1,13 +1,16 @@
 benchmark('Test', () => {
   setup(() => {});
 
-  measure('a', async (next) => {
+  measure('a', async () => {
+    return () => {};
+  });
+  measure('b', async (next) => {
     return () => next();
   });
-  measure('b', async (context, next) => {
+  measure('c', async (context, next) => {
     return () => next();
   });
-  measure('c', async (context, input, next) => {
+  measure('d', async (context, input, next) => {
     return () => next();
   });
 
