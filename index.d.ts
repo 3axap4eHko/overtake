@@ -1,5 +1,3 @@
-import { Event } from 'evnty';
-
 declare global {
   type CanBePromise<T> = Promise<T> | T;
 
@@ -11,8 +9,15 @@ declare global {
     max: number;
     sum: number;
     avg: number;
-    med: number;
     mode: number;
+    p1: number;
+    p5: number;
+    p20: number;
+    p33: number;
+    p50: number;
+    med: number;
+    p66: number;
+    p80: number;
     p90: number;
     p95: number;
     p99: number;
@@ -23,52 +28,6 @@ declare global {
     total: number;
   }
 
-  interface Overtake {
-    onLoad: Event<any>;
-
-    onRun: Event<any>;
-
-    onComplete: Event<any>;
-
-    onScriptRegister: Event<any>;
-
-    onScriptStart: Event<any>;
-
-    onScriptComplete: Event<any>;
-
-    onSuiteRegister: Event<any>;
-
-    onSuiteStart: Event<any>;
-
-    onSuiteComplete: Event<any>;
-
-    onSetupRegister: Event<any>;
-
-    onTeardownRegister: Event<any>;
-
-    onMeasureRegister: Event<any>;
-
-    onMeasureStart: Event<any>;
-
-    onMeasureComplete: Event<any>;
-
-    onPerformRegister: Event<any>;
-
-    onPerformStart: Event<any>;
-
-    onPerformProgress: Event<any>;
-
-    onPerformComplete: Event<any>;
-
-    onReport: Event<Report>;
-  }
-
-  function benchmark(title: string, init: () => void): void;
-
-  function setup<C>(init: () => CanBePromise<C>): any;
-
-  function teardown<C>(teardown: (context: C) => CanBePromise<void>): void;
-
   type MeasureInitResult = CanBePromise<() => void>;
 
   function measure(title: string, init: () => MeasureInitResult): void;
@@ -78,5 +37,20 @@ declare global {
 
   function perform<A>(title: string, counter: number, args: A): void;
 
-  function reporter(reporter: (overtake: Overtake) => void): void;
+  function setup<C>(init: () => CanBePromise<C>): void;
+
+  function teardown<C>(teardown: (context: C) => CanBePromise<void>): void;
+
+  interface Suite {
+    title: string;
+    setup: typeof setup;
+    teardown: typeof teardown;
+    measures: typeof measure[];
+    performs: typeof perform[];
+    init: () => void;
+  }
+
+  function benchmark(title: string, init: () => void): void;
+
+  function script(filename): Promise<Suite[]>;
 }

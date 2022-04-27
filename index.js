@@ -1,183 +1,112 @@
-import Path from 'path';
+import { createContext } from 'conode';
 import WorkerThreads from 'worker_threads';
-import { Event } from 'evnty';
+
+const overtakeContext = createContext();
+const suiteContext = createContext();
 
 export const NOOP = () => {};
 
-export class Perform {
-  title = '';
+export const setup = (fn) => {
+  suiteContext.getContext().setup = fn;
+};
 
-  count = 0;
+export const teardown = (fn) => {
+  suiteContext.getContext().teardown = fn;
+};
 
-  args;
+export const measure = (title, fn) => {
+  suiteContext.getContext().measures.push({ title, init: fn });
+};
 
-  constructor(overtake, title, count, args) {
-    this.title = title;
-    this.count = count;
-    this.args = args;
-  }
+export const perform = (title, count, args) => {
+  suiteContext.getContext().performs.push({ title, count, args });
+};
+
+export const benchmark = (title, fn) => {
+  const setup = NOOP;
+  const teardown = NOOP;
+  const measures = [];
+  const performs = [];
+
+  overtakeContext.getContext().suites.push({
+    title,
+    setup,
+    teardown,
+    measures,
+    performs,
+    init: fn,
+  });
+};
+
+export const load = async (filename) => {
+  const suites = [];
+  const script = { filename, suites };
+  await overtakeContext.contextualize(script, () => import(filename));
+
+  return script;
+};
+const map = {
+  script: '⭐ Script ',
+  suite: '⇶ Suite ',
+  perform: '➤ Perform ',
+  measure: '✓ Measure',
+};
+
+export const defaultReporter = async (type, title, test) => {
+  console.group(`${map[type]} ${title}`);
+  await test({ test: defaultReporter, output: (report) => console.table(report) });
+  console.groupEnd();
+};
+
+const ACCURACY = 6;
+export function formatFloat(value, digits = ACCURACY) {
+  return parseFloat(value.toFixed(digits));
 }
 
-export class Measure {
-  title = '';
-
-  init = NOOP;
-
-  constructor(overtake, title, init = NOOP) {
-    this.title = title;
-    this.init = init;
-  }
-}
-
-export class Suite {
-  title = '';
-
-  setup = NOOP;
-
-  measures = [];
-
-  performs = [];
-
-  teardown = NOOP;
-
-  #init = NOOP;
-
-  #overtake = null;
-
-  constructor(overtake, title, init = NOOP) {
-    this.#overtake = overtake;
-    this.title = title;
-    this.#init = init;
-  }
-
-  async init() {
-    const unsubscribes = [
-      this.#overtake.onSetupRegister.on((setup) => (this.setup = setup)),
-      this.#overtake.onMeasureRegister.on((measure) => this.measures.push(measure)),
-      this.#overtake.onPerformRegister.on((perform) => this.performs.push(perform)),
-      this.#overtake.onTeardownRegister.on((teardown) => (this.teardown = teardown)),
-    ];
-    await this.#init();
-    unsubscribes.forEach((unsubscribe) => unsubscribe());
-  }
-}
-
-export class Script {
-  onLoad = new Event();
-
-  filename = '';
-
-  suites = [];
-
-  constructor(filename) {
-    this.filename = filename;
-  }
-}
-
-export class Overtake {
-  onLoad = new Event();
-
-  onRun = new Event();
-
-  onComplete = new Event();
-
-  onScriptRegister = new Event();
-
-  onScriptStart = new Event();
-
-  onScriptComplete = new Event();
-
-  onSuiteRegister = new Event();
-
-  onSuiteStart = new Event();
-
-  onSuiteComplete = new Event();
-
-  onSetupRegister = new Event();
-
-  onTeardownRegister = new Event();
-
-  onMeasureRegister = new Event();
-
-  onMeasureStart = new Event();
-
-  onMeasureComplete = new Event();
-
-  onPerformRegister = new Event();
-
-  onPerformStart = new Event();
-
-  onPerformProgress = new Event();
-
-  onPerformComplete = new Event();
-
-  onReport = new Event();
-
-  scripts = [];
-
-  reporters = [];
-
-  constructor(options = {}) {
-    Object.assign(globalThis, {
-      benchmark: (title, init) => this.onSuiteRegister(new Suite(this, title, init)),
-      setup: (init) => this.onSetupRegister(init),
-      teardown: (init) => this.onTeardownRegister(init),
-      measure: (title, init) => this.onMeasureRegister(new Measure(this, title, init)),
-      perform: (title, count, args) => this.onPerformRegister(new Perform(this, title, count, args)),
-      reporter: (reporter) => this.reporters.push(reporter(this)),
+export const run = async (scripts, reporter) => {
+  for (const script of scripts) {
+    await reporter('script', script.filename, async (scriptTest) => {
+      for (const suite of script.suites) {
+        await scriptTest.test('suite', suite.title, async (suiteTest) => {
+          await suiteContext.contextualize(suite, suite.init);
+          for (const perform of suite.performs) {
+            await suiteTest.test('perform', perform.title, async (performTest) => {
+              for (const measure of suite.measures) {
+                await performTest.test('measure', measure.title, async (measureTest) => {
+                  const result = await runWorker({
+                    setup: suite.setup,
+                    teardown: suite.teardown,
+                    init: measure.init,
+                    count: perform.count,
+                    args: perform.args,
+                  });
+                  if (result.success) {
+                    measureTest.output({
+                      [formatFloat(result.mode)]: {
+                        total: formatFloat(result.total),
+                        med: formatFloat(result.med),
+                        p95: formatFloat(result.p95),
+                        p99: formatFloat(result.p99),
+                      },
+                    });
+                  } else {
+                    measureTest.output({
+                      error: {
+                        reason: result.error,
+                      },
+                    });
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
     });
   }
+};
 
-  async load(files) {
-    this.onLoad(this);
-    for (const file of files) {
-      const filename = Path.resolve(file);
-      const script = new Script(filename);
-      const unsubscribe = this.onSuiteRegister.on((suite) => {
-        script.suites.push(suite);
-      });
-      await import(filename);
-      unsubscribe();
-      this.scripts.push(script);
-      this.onScriptRegister(script);
-    }
-  }
-
-  async run() {
-    this.onRun();
-    for (const script of this.scripts) {
-      this.onScriptStart(script);
-      for (const suite of script.suites) {
-        await suite.init().catch((e) => console.error(e));
-        this.onSuiteStart(suite);
-        for (const measure of suite.measures) {
-          this.onMeasureStart(measure);
-          for (const perform of suite.performs) {
-            this.onPerformStart(perform);
-            const result = await runWorker(
-              {
-                setup: suite.setup,
-                teardown: suite.teardown,
-                init: measure.init,
-                count: perform.count,
-                args: perform.args,
-              },
-              this.onPerformProgress
-            );
-            this.onPerformComplete(perform);
-            this.onReport(result);
-          }
-          this.onMeasureComplete(perform);
-        }
-        this.onSuiteComplete(perform);
-      }
-      this.onScriptComplete(perform);
-    }
-    this.onComplete(this);
-  }
-}
-
-export async function runWorker({ args, count, ...options }, onProgress) {
+export async function runWorker({ args, count, ...options }, onProgress = null) {
   const setupCode = options.setup.toString();
   const teardownCode = options.teardown.toString();
   const initCode = options.init.toString();
@@ -192,7 +121,7 @@ export async function runWorker({ args, count, ...options }, onProgress) {
   const worker = new WorkerThreads.Worker(new URL('runner.js', import.meta.url), { argv: [params] });
   return new Promise((resolve) => {
     worker.on('message', (data) => {
-      if (data.type === 'progress') {
+      if (onProgress && data.type === 'progress') {
         onProgress(data);
       } else if (data.type === 'report') {
         resolve(data);
@@ -292,14 +221,7 @@ export async function start(input) {
     });
     buckets.sort((a, b) => a[1] - b[1]);
 
-    const medIdx = Math.trunc((50 * timings.length) / 100);
-    const med = timings[medIdx];
-    const p90Idx = Math.trunc((90 * timings.length) / 100);
-    const p90 = timings[p90Idx];
-    const p95Idx = Math.trunc((95 * timings.length) / 100);
-    const p95 = timings[p95Idx];
-    const p99Idx = Math.trunc((99 * timings.length) / 100);
-    const p99 = timings[p99Idx];
+    const percentile = (p) => timings[Math.trunc((p * timings.length) / 100)];
     const mode = buckets[buckets.length - 1][0];
 
     send({
@@ -310,11 +232,19 @@ export async function start(input) {
       max,
       sum,
       avg,
-      med,
       mode,
-      p90,
-      p95,
-      p99,
+      p1: percentile(1),
+      p5: percentile(5),
+      p10: percentile(10),
+      p20: percentile(20),
+      p33: percentile(33),
+      p50: percentile(50),
+      med: percentile(50),
+      p66: percentile(66),
+      p80: percentile(80),
+      p90: percentile(90),
+      p95: percentile(95),
+      p99: percentile(99),
       setup: setupMark - startMark,
       init: initDoneMark - initMark,
       cycles: teardownMark - cyclesMark,
