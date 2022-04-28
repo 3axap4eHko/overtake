@@ -59,7 +59,27 @@ const map = {
 
 export const defaultReporter = async (type, title, test) => {
   console.group(`${map[type]} ${title}`);
-  await test({ test: defaultReporter, output: (report) => console.table(report) });
+  await test({
+    test: defaultReporter,
+    output: (report) =>
+      console.table(
+        report.success
+          ? {
+              [formatFloat(report.mode)]: {
+                med: formatFloat(report.med),
+                p95: formatFloat(report.p95),
+                p99: formatFloat(report.p99),
+                total: formatFloat(report.sum),
+                count: report.count,
+              },
+            }
+          : {
+              error: {
+                reason: report.error,
+              },
+            }
+      ),
+  });
   console.groupEnd();
 };
 
@@ -85,23 +105,7 @@ export const run = async (scripts, reporter) => {
                     count: perform.count,
                     args: perform.args,
                   });
-                  if (result.success) {
-                    measureTest.output({
-                      [formatFloat(result.mode)]: {
-                        total: formatFloat(result.total),
-                        med: formatFloat(result.med),
-                        p95: formatFloat(result.p95),
-                        p99: formatFloat(result.p99),
-                        count: result.count,
-                      },
-                    });
-                  } else {
-                    measureTest.output({
-                      error: {
-                        reason: result.error,
-                      },
-                    });
-                  }
+                  measureTest.output(result);
                 });
               }
             });
