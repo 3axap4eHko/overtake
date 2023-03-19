@@ -97,7 +97,7 @@ export const run = async (scripts, reporter) => {
           for (const perform of suite.performs) {
             await suiteTest.test('perform', perform.title, async (performTest) => {
               for (const measure of suite.measures) {
-                await performTest.test('measure', measure.title, async (measureTest) => {
+                await performTest.test('measure', perform.count + ' ' + measure.title, async (measureTest) => {
                   const result = await runWorker({
                     setup: suite.setup,
                     teardown: suite.teardown,

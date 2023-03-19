@@ -1,7 +1,6 @@
 #!/usr/bin/env -S node --no-warnings
 
 import { Command } from 'commander';
-import { promisify } from 'util';
 import Path from 'path';
 import glob from 'glob';
 import { load, createScript, benchmark, setup, teardown, measure, perform, run, defaultReporter } from './index.js';
@@ -18,16 +17,12 @@ commands
   .action(async (patterns, { count = 1, inline }) => {
     Object.assign(globalThis, { benchmark, setup, teardown, measure, perform });
 
-    const globAsync = promisify(glob);
-    const foundFiles = await Promise.all(patterns.map((pattern) => globAsync(pattern)));
-    const files = [
-      ...new Set(
-        []
-          .concat(...foundFiles)
-          .map((filename) => Path.resolve(filename))
-          .filter(Boolean)
-      ),
-    ];
+    const foundFiles = await glob(patterns);
+    if (!foundFiles.length) {
+      console.error(`No files found with patterns ${patterns.join(', ')}`);
+      process.exit(1);
+    }
+    const files = [...new Set(foundFiles.map((filename) => Path.resolve(filename)).filter(Boolean))];
 
     const scripts = [];
     if (inline.length) {

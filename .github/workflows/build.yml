@@ -29,4 +29,6 @@ jobs:
           echo "NODE_ENV=production" >> $GITHUB_ENV
 
       - name: Test
-        run: yarn test
+        run: |
+          yarn test
+          start __benchmarks__/test.js
