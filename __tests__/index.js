@@ -41,9 +41,15 @@ describe('Overtake test suite', () => {
     const anyFn = expect.any(Function);
     expect(testReporter).toBeCalledWith('script', TEST_BENCHMARK, anyFn);
     expect(testReporter).toBeCalledWith('suite', 'Test', anyFn);
-    expect(testReporter).toBeCalledWith('measure', 'a', anyFn);
-    expect(testReporter).toBeCalledWith('measure', 'b', anyFn);
-    expect(testReporter).toBeCalledWith('measure', 'c', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '1 a', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '10 a', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '100 a', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '1 b', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '10 b', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '100 b', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '1 c', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '10 c', anyFn);
+    expect(testReporter).toBeCalledWith('measure', '100 c', anyFn);
     expect(testReporter).toBeCalledWith('perform', 'X', anyFn);
     expect(testReporter).toBeCalledWith('perform', 'Y', anyFn);
     expect(testReporter).toBeCalledWith('perform', 'Z', anyFn);
