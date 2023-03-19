@@ -9,7 +9,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [16.x]
+        node-version: [18.x]
 
     steps:
       - name: Checkout
@@ -31,4 +31,4 @@ jobs:
       - name: Test
         run: |
           yarn test
-          start __benchmarks__/test.js
+          yarn start __benchmarks__/test.js
