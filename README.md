@@ -14,6 +14,7 @@ Performance benchmark for NodeJS
 - [Features](#features)
 - [Installing](#installing)
 - [Examples](#examples)
+- [Showcase](#showcase)
 - [License](#license)
 
 ## Features
@@ -124,6 +125,15 @@ npx overtake -i "class A{}" -i "function A() {}" -i "A = () => {};" -c 20000
 ```
 
 Please take a look at [benchmarks](__benchmarks__) to see more examples
+
+## Showcase
+
+Already measured performance
+
+- [Class vs Function](./overtakes/class-vs-function.md)
+- [Postgres vs MongoDB](./overtakes/postgres-vs-mongo.md)
+- [Array Copy](./overtakes/array-copy.md)
+- [Array Delete Element](./overtakes/array-delete-element.md)
 
 ## License
 
