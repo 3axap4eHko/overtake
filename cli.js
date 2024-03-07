@@ -1,9 +1,9 @@
 #!/usr/bin/env -S node --no-warnings
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import Path from 'path';
-import glob from 'glob';
-import { load, createScript, benchmark, setup, teardown, measure, perform, run, defaultReporter } from './index.js';
+import { glob } from 'glob';
+import { load, createScript, benchmark, setup, teardown, measure, perform, run, defaultReporter, allowedFields } from './index.js';
 import packageJson from './package.json' assert { type: 'json' };
 
 const commands = new Command();
@@ -11,10 +11,23 @@ const commands = new Command();
 commands.name('overtake').description(packageJson.description).version(packageJson.version, '-v, --version');
 
 commands
-  .argument('[files...]', 'file paths or path patterns to search benchmark scripts')
-  .option('-i, --inline [inline]', 'inline code to benchmark', (value, previous) => previous.concat([value]), [])
-  .option('-c, --count [count]', 'perform count for inline code', (v) => parseInt(v))
-  .action(async (patterns, { count = 1, inline }) => {
+  .argument('[files...]', 'File paths or path patterns to search benchmark scripts')
+  .option('-i, --inline [inline]', 'Inline benchmark.', (value, previous) => previous.concat([value]), [])
+  .option('-c, --count [count]', 'Perform count for inline benchmark.', (v) => parseInt(v))
+  .addOption(
+    new Option('-f, --fields [fields]', `Comma separated list of fields to report. Allowed values are: ${allowedFields}.`)
+      .default(['med', 'p95', 'p99', 'sum:total', 'count'])
+      .argParser((fields) =>
+        fields.split(',').filter((field) => {
+          if (!allowedFields.includes(field)) {
+            console.error(`Invalid field name: ${field}. Allowed values are: ${allowedFields.join(', ')}.`);
+            process.exit(1);
+          }
+          return true;
+        }),
+      ),
+  )
+  .action(async (patterns, { count = 1, inline, fields }) => {
     Object.assign(globalThis, { benchmark, setup, teardown, measure, perform });
 
     const foundFiles = await glob(patterns);
@@ -43,7 +56,7 @@ commands
       scripts.push(script);
     }
 
-    await run(scripts, defaultReporter);
+    await run(scripts, defaultReporter, fields);
   });
 
 commands.on('--help', () => {

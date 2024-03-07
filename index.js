@@ -6,6 +6,32 @@ const suiteContext = createContext();
 
 export const NOOP = () => {};
 
+export const allowedFields = [
+  'mode',
+  'med',
+  'p1',
+  'p5',
+  'p10',
+  'p20',
+  'p33',
+  'p50',
+  'p66',
+  'p80',
+  'p90',
+  'p95',
+  'p99',
+  'min',
+  'max',
+  'avg',
+  'sum',
+  'count',
+  'setup',
+  'init',
+  'cycles',
+  'teardown',
+  'total',
+];
+
 export const setup = (fn) => {
   suiteContext.getContext().setup = fn;
 };
@@ -57,27 +83,25 @@ const map = {
   measure: '✓ Measure',
 };
 
-export const defaultReporter = async (type, title, test) => {
+export const defaultReporter = async (type, title, test, fields) => {
   console.group(`${map[type]} ${title}`);
   await test({
-    test: defaultReporter,
+    test: (...args) => defaultReporter(...args, fields),
     output: (report) =>
       console.table(
         report.success
           ? {
-              [formatFloat(report.mode)]: {
-                med: formatFloat(report.med),
-                p95: formatFloat(report.p95),
-                p99: formatFloat(report.p99),
-                total: formatFloat(report.sum),
-                count: report.count,
-              },
+              [formatFloat(report.mode)]: fields.reduce((data, field) => {
+                const [key, alias = key] = field.split(':');
+                data[alias] = formatFloat(report[key]);
+                return data;
+              }, {}),
             }
           : {
               error: {
                 reason: report.error,
               },
-            }
+            },
       ),
   });
   console.groupEnd();
@@ -88,31 +112,36 @@ export function formatFloat(value, digits = ACCURACY) {
   return parseFloat(value.toFixed(digits));
 }
 
-export const run = async (scripts, reporter) => {
+export const run = async (scripts, reporter, fields) => {
   for (const script of scripts) {
-    await reporter('script', script.filename, async (scriptTest) => {
-      for (const suite of script.suites) {
-        await scriptTest.test('suite', suite.title, async (suiteTest) => {
-          await suiteContext.contextualize(suite, suite.init);
-          for (const perform of suite.performs) {
-            await suiteTest.test('perform', perform.title, async (performTest) => {
-              for (const measure of suite.measures) {
-                await performTest.test('measure', perform.count + ' ' + measure.title, async (measureTest) => {
-                  const result = await runWorker({
-                    setup: suite.setup,
-                    teardown: suite.teardown,
-                    init: measure.init,
-                    count: perform.count,
-                    args: perform.args,
+    await reporter(
+      'script',
+      script.filename,
+      async (scriptTest) => {
+        for (const suite of script.suites) {
+          await scriptTest.test('suite', suite.title, async (suiteTest) => {
+            await suiteContext.contextualize(suite, suite.init);
+            for (const perform of suite.performs) {
+              await suiteTest.test('perform', perform.title, async (performTest) => {
+                for (const measure of suite.measures) {
+                  await performTest.test('measure', perform.count + ' ' + measure.title, async (measureTest) => {
+                    const result = await runWorker({
+                      setup: suite.setup,
+                      teardown: suite.teardown,
+                      init: measure.init,
+                      count: perform.count,
+                      args: perform.args,
+                    });
+                    measureTest.output(result);
                   });
-                  measureTest.output(result);
-                });
-              }
-            });
-          }
-        });
-      }
-    });
+                }
+              });
+            }
+          });
+        }
+      },
+      fields,
+    );
   }
 };
 
