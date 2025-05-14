@@ -1,5 +1,6 @@
-import { createContext } from 'conode';
-import WorkerThreads from 'worker_threads';
+import WorkerThreads from 'node:worker_threads';
+import pkg from 'conode';
+const { createContext } = pkg;
 
 const overtakeContext = createContext();
 const suiteContext = createContext();

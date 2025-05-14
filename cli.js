@@ -4,7 +4,7 @@ import { Command, Option } from 'commander';
 import Path from 'path';
 import { glob } from 'glob';
 import { load, createScript, benchmark, setup, teardown, measure, perform, run, defaultReporter, allowedFields } from './index.js';
-import packageJson from './package.json' assert { type: 'json' };
+import packageJson from './package.json' with { type: 'json' };
 
 const commands = new Command();
 
