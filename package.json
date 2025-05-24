@@ -3,7 +3,7 @@
   "version": "1.0.0-rc.0",
   "description": "NodeJS performance benchmark",
   "main": "build/index.js",
-  "types": "index.d.ts",
+  "types": "build/index.d.ts",
   "type": "module",
   "bin": {
     "overtake": "bin/overtake.js"
