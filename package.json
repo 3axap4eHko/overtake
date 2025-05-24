@@ -11,7 +11,7 @@
   "scripts": {
     "build": "rm -rf build && inop src build -i __tests__ -i *.tmp.ts && tsc --declaration --emitDeclarationOnly",
     "start": "./bin/overtake.js",
-    "test": "jest --detectOpenHandles",
+    "test": "jest --detectOpenHandles --passWithNoTests",
     "prepare": "husky"
   },
   "engines": {

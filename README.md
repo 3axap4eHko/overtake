@@ -5,9 +5,10 @@ Performance benchmark for NodeJS
 [![Build Status][github-image]][github-url]
 [![NPM version][npm-image]][npm-url]
 [![Downloads][downloads-image]][npm-url]
-[![Coverage Status][codecov-image]][codecov-url]
-[![Maintainability][codeclimate-image]][codeclimate-url]
-[![Snyk][snyk-image]][snyk-url]
+
+<!--[![Coverage Status][codecov-image]][codecov-url]-->
+<!--[![Maintainability][codeclimate-image]][codeclimate-url]-->
+<!--[![Snyk][snyk-image]][snyk-url]-->
 
 ## Table of Contents
 
