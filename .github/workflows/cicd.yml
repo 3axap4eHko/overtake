@@ -3,41 +3,12 @@ name: CI/CD
 on: [push, pull_request]
 
 jobs:
-  test:
-    name: Build & Test
+  build:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v3
+      - name: Run CI/CD Pipeline
+        uses: zource-dev/action@v1
         with:
-          node-version: ${{ matrix.node-version }}
-          registry-url: https://registry.npmjs.org/
-
-      - uses: pnpm/action-setup@v3
-        name: Install pnpm
-        with:
-          version: 8
-          run_install: false
-
-      - name: Environment log
-        id: env
-        run: |
-          node --version
-          pnpm --version
-
-      - name: Install dependencies
-        run: |
-          pnpm install --frozen-lockfile
-
-      - name: Test
-        run: |
-          pnpm test
-          pnpm start __benchmarks__/test.js
+          node_version: '22.x'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          codecov_token: ${{ secrets.CODECOV_TOKEN }}
