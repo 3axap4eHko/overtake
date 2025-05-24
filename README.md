@@ -14,7 +14,6 @@ Performance benchmark for NodeJS
 - [Features](#features)
 - [Installing](#installing)
 - [Examples](#examples)
-- [Showcase](#showcase)
 - [License](#license)
 
 ## Features
@@ -25,10 +24,10 @@ Performance benchmark for NodeJS
 
 ## Installing
 
-Using yarn:
+Using pnpm:
 
 ```bash
-$ yarn add -D overtake
+$ pnpm add -D overtake
 ```
 
 Using npm:
@@ -39,101 +38,95 @@ $ npm install -D overtake
 
 ## Examples
 
-### Public interface
+### From command line
 
-Create a benchmark in `__benchmarks__` folder
+Create a benchmark file
 
-```javascript
-benchmark('mongodb vs postgres', () => {
-  // initialize a context for benchmark
-  setup(async () => {
-    const { Client } = await import('pg');
-    const postgres = new Client();
-    await postgres.connect();
+```typescript
+// src/__bench__/array-copy.ts
+const suite = benchmark('1M array of strings', () => Array.from({ length: 1_000_000 }, (_, idx) => `${idx}`))
+  .feed('1M array of numbers', () => Array.from({ length: 1_000_000 }, (_, idx) => idx))
+  .feed('1M typed array', () => new Uint32Array(1_000_000).map((_, idx) => idx));
 
-    const { MongoClient } = await import('mongob');
-    const mongo = new MongoClient(uri);
-    await mongo.connect();
+suite.target('for loop').measure('copy half', (_, input) => {
+  const n = input?.length ?? 0;
+  const mid = n / 2;
+  for (let i = 0; i < mid; i++) {
+    input[i + mid] = input[i];
+  }
+});
 
-    return { postgres, mongo };
-  });
-
-  measure('mongodb inserts', ({ mongo } /* context */, next) => {
-    // prepare a collection
-    const database = mongo.db('overtake');
-    const test = database.collection('test');
-
-    return (data) => test.insertOne(data).then(next);
-  });
-
-  measure('postgres inserts', ({ postgres } /* context */, next) => {
-    // prepare a query
-    const query = 'INSERT INTO overtake(value) VALUES($1) RETURNING *';
-
-    return (data) => postgres.query(query, [data.value]).then(next);
-  });
-
-  teardown(async ({ mongo, postgres }) => {
-    await postgres.end();
-    await mongo.end();
-  });
-
-  perform('simple test', 100000, [[{ value: 'test' }]]);
+suite.target('copyWithin').measure('copy half', (_, input) => {
+  const n = input?.length ?? 0;
+  const mid = n / 2;
+  input.copyWithin(mid, 0, mid);
 });
 ```
 
-Make sure you have installed used modules and run
+Run the command
 
 ```bash
-yarn overtake
+npx overtake src/__bench__/array-copy.ts -f table -r ops mode mean p99
 ```
 
-or
+```
+ for loop copy half
+┌─────────────────────┬──────────────────────┬─────────────┬─────────────┬─────────────────────┬────────┐
+│ (index)             │ ops                  │ mode        │ mean        │ p99                 │ count  │
+├─────────────────────┼──────────────────────┼─────────────┼─────────────┼─────────────────────┼────────┤
+│ 1M typed array      │ '3698 ops/s ± 0.81%' │ '256.65 µs' │ '270.38 µs' │ '574.7 µs ± 0.19%'  │ '1000' │
+│ 1M array of numbers │ '2902 ops/s ± 0.3%'  │ '343.92 µs' │ '344.51 µs' │ '429.24 µs ± 0.2%'  │ '1000' │
+│ 1M array of strings │ '2277 ops/s ± 0.46%' │ '397.15 µs' │ '438.99 µs' │ '569.15 µs ± 0.12%' │ '1000' │
+└─────────────────────┴──────────────────────┴─────────────┴─────────────┴─────────────────────┴────────┘
+
+ copyWithin copy half
+┌─────────────────────┬───────────────────────┬────────────┬────────────┬────────────────────┬────────┐
+│ (index)             │ ops                   │ mode       │ mean       │ p99                │ count  │
+├─────────────────────┼───────────────────────┼────────────┼────────────┼────────────────────┼────────┤
+│ 1M typed array      │ '17454 ops/s ± 0.67%' │ '53.11 µs' │ '57.29 µs' │ '81.18 µs ± 1.54%' │ '1000' │
+│ 1M array of numbers │ '103 ops/s ± 0.02%'   │ '9.49 ms'  │ '9.64 ms'  │ '9.91 ms ± 0.38%'  │ '50'   │
+│ 1M array of strings │ '101 ops/s ± 0.06%'   │ '9.55 ms'  │ '9.87 ms'  │ '10.87 ms ± 2.67%' │ '98'   │
+└─────────────────────┴───────────────────────┴────────────┴────────────┴────────────────────┴────────┘
+```
+
+### From a standalone module
+
+Create a benchmark file
+
+```typescript
+// src/__bench__/array-copy.js
+import { Benchmark, printTableReports } from 'overtake';
+
+const benchmark = Benchmark.create('1M array of strings', () => Array.from({ length: 1_000_000 }, (_, idx) => `${idx}`))
+  .feed('1M array of numbers', () => Array.from({ length: 1_000_000 }, (_, idx) => idx))
+  .feed('1M typed array', () => new Uint32Array(1_000_000).map((_, idx) => idx));
+
+benchmark.target('for loop').measure('copy half', (_, input) => {
+  const n = input?.length ?? 0;
+  const mid = n / 2;
+  for (let i = 0; i < mid; i++) {
+    input[i + mid] = input[i];
+  }
+});
+
+benchmark.target('copyWithin').measure('copy half', (_, input) => {
+  const n = input?.length ?? 0;
+  const mid = n / 2;
+  input.copyWithin(mid, 0, mid);
+});
+
+const reports = await benchmark.execute({
+  reportTypes: ['ops', 'mode', 'mean', 'p99'],
+});
+
+printTableReports(reports);
+```
+
+And run the command
 
 ```bash
-npx overtake
+node src/__bench__/array-copy.js
 ```
-
-### Inline support
-
-```bash
-npx overtake -i "class A{}" -i "function A() {}" -i "A = () => {};" -c 20000
-```
-
-```
-⭐ Script
-  ⇶ Suite
-    ➤ Perform
-      ✓ Measure class A{}
-        ┌─────────┬──────────┬──────────┬──────────┬───────────┬───────┐
-        │ (index) │   med    │   p95    │   p99    │   total   │ count │
-        ├─────────┼──────────┼──────────┼──────────┼───────────┼───────┤
-        │ 0.0005  │ 0.000551 │ 0.001493 │ 0.002344 │ 16.506385 │ 20000 │
-        └─────────┴──────────┴──────────┴──────────┴───────────┴───────┘
-      ✓ Measure function A() {}
-        ┌─────────┬─────────┬────────┬──────────┬──────────┬───────┐
-        │ (index) │   med   │  p95   │   p99    │  total   │ count │
-        ├─────────┼─────────┼────────┼──────────┼──────────┼───────┤
-        │ 0.00008 │ 0.00009 │ 0.0003 │ 0.000441 │ 2.875578 │ 20000 │
-        └─────────┴─────────┴────────┴──────────┴──────────┴───────┘
-      ✓ Measure A = () => {};
-        ┌─────────┬─────────┬──────────┬──────────┬─────────┬───────┐
-        │ (index) │   med   │   p95    │   p99    │  total  │ count │
-        ├─────────┼─────────┼──────────┼──────────┼─────────┼───────┤
-        │ 0.00008 │ 0.00012 │ 0.000331 │ 0.000601 │ 3.42556 │ 20000 │
-        └─────────┴─────────┴──────────┴──────────┴─────────┴───────┘
-```
-
-Please take a look at [benchmarks](__benchmarks__) to see more examples
-
-## Showcase
-
-Already measured performance
-
-- [Class vs Function](./overtakes/class-vs-function.md)
-- [Postgres vs MongoDB](./overtakes/postgres-vs-mongo.md)
-- [Array Copy](./overtakes/array-copy.md)
-- [Array Delete Element](./overtakes/array-delete-element.md)
 
 ## License
 

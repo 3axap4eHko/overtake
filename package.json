@@ -2,16 +2,20 @@
   "name": "overtake",
   "version": "0.1.2",
   "description": "NodeJS performance benchmark",
-  "main": "index.js",
+  "main": "build/index.js",
   "types": "index.d.ts",
   "type": "module",
   "bin": {
-    "overtake": "cli.js"
+    "overtake": "bin/overtake.js"
   },
   "scripts": {
-    "start": "./cli.js",
+    "build": "rm -rf build && inop src build -i __tests__ -i *.tmp.ts && tsc --declaration --emitDeclarationOnly",
+    "start": "./bin/overtake.js",
     "test": "jest --detectOpenHandles",
     "prepare": "husky"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "repository": {
     "type": "git",
@@ -31,23 +35,21 @@
   "homepage": "https://github.com/3axap4eHko/overtake#readme",
   "devDependencies": {
     "@jest/globals": "^29.7.0",
-    "@swc/core": "^1.11.24",
     "@swc/jest": "^0.2.38",
+    "@types/async": "^3.2.24",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.15.18",
-    "ajv": "^8.17.1",
-    "ascertain": "1.2.104",
     "husky": "^9.1.7",
+    "inop": "^0.7.8",
     "jest": "^29.7.0",
-    "mongodb": "^6.16.0",
-    "pg": "^8.16.0",
     "prettier": "^3.5.3",
     "pretty-quick": "^4.1.1",
-    "zod": "^3.24.4"
+    "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@swc/core": "^1.11.24",
+    "async": "^3.2.6",
     "commander": "^13.1.0",
-    "conode": "^0.2.0",
     "glob": "^11.0.2"
   },
   "packageManager": "pnpm@10.10.0+sha512.d615db246fe70f25dcfea6d8d73dee782ce23e2245e3c4f6f888249fb568149318637dca73c2c5c8ef2a4ca0d5657fb9567188bfab47f566d1ee6ce987815c39"
