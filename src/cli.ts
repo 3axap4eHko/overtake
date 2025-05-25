@@ -1,10 +1,10 @@
 import { createRequire, Module } from 'node:module';
-import { SyntheticModule, createContext, SourceTextModule, Module as VMModule } from 'node:vm';
+import { SyntheticModule, createContext, SourceTextModule } from 'node:vm';
 import { stat, readFile } from 'node:fs/promises';
 import { parse, print } from '@swc/core';
 import { Command, Option } from 'commander';
 import { glob } from 'glob';
-import { Benchmark, printTableReports, printJSONReports, printSimpleReports, DEFAULT_REPORT_TYPES, DEFAULT_WORKERS } from './benchmark.js';
+import { Benchmark, printTableReports, printJSONReports, printSimpleReports, DEFAULT_REPORT_TYPES, DEFAULT_WORKERS } from './index.js';
 import { REPORT_TYPES } from './types.js';
 
 const require = createRequire(import.meta.url);

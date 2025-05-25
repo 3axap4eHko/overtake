@@ -14,7 +14,7 @@ function smartFixed(n: number): string {
   return n.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-    useGrouping: false,
+    useGrouping: true,
   });
 }
 export class Report {
