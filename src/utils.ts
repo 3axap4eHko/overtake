@@ -57,7 +57,7 @@ export class ScaledBigInt {
     this.value *= value;
   }
   unscale() {
-    return this.value / this.value;
+    return this.value / this.scale;
   }
   number() {
     return Number(div(this.value, this.scale));
