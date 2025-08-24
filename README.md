@@ -71,19 +71,39 @@ Compare different implementations of the same operation:
 
 ```typescript
 // benchmark.ts
-const suite = benchmark('Process 1000 items')
-  .target('for loop')
-  .measure('sum', (_, input) => {
-    let sum = 0;
-    for (let i = 0; i < 1000; i++) {
-      sum += i;
-    }
-    return sum;
-  });
+// npx overtake benchmark.ts
+const suite = benchmark('1000 numbers', () => Array.from({ length: 1_000 }, (_, idx) => idx)).feed('10000 numbers', () => Array.from({ length: 10_000 }, (_, idx) => idx));
+
+suite.target('for loop').measure('sum', (_, input) => {
+  const n = input.length;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += input[i];
+  }
+  return sum;
+});
 
 suite.target('reduce').measure('sum', (_, input) => {
-  return Array.from({ length: 1000 }, (_, i) => i).reduce((a, b) => a + b, 0);
+  return input.reduce((a, b) => a + b, 0);
 });
+```
+
+### With Dynamic Imports (Required for External Modules)
+
+```typescript
+// crypto-benchmark.ts
+// npx overtake crypto-benchmark.ts
+const suite = benchmark('Hash 1MB data', () => Buffer.alloc(1_000_000));
+
+// Dynamic import required for modules in worker threads
+suite
+  .target('crypto SHA256', async () => {
+    const { createHash } = await import('node:crypto');
+    return { createHash };
+  })
+  .measure('hash', ({ createHash }, input) => {
+    createHash('sha256').update(input).digest();
+  });
 ```
 
 Run with CLI:
@@ -120,12 +140,34 @@ suite.target('implementation B').measure('operation', (ctx, input) => {
 });
 ```
 
+### Dynamic Imports in Targets (Critical!)
+
+**⚠️ IMPORTANT**: Since targets run in isolated worker threads, all module imports MUST be dynamic inside the target callback:
+
+```typescript
+// ✅ CORRECT - Dynamic import inside target
+suite
+  .target('V8 serialization', async () => {
+    const { serialize, deserialize } = await import('node:v8');
+    return { serialize, deserialize };
+  })
+  .measure('serialize', ({ serialize }, input) => {
+    return serialize(input);
+  });
+
+// ❌ WRONG - Static import won't work in worker thread
+import { serialize } from 'node:v8';
+suite.target('V8', () => ({ serialize })); // This will fail!
+```
+
 ### Setup and Teardown
 
 ```typescript
 suite
   .target('with setup', async () => {
     // Setup: runs once before measurements
+    // Remember: imports must be dynamic!
+    const { createConnection } = await import('./db.js');
     const connection = await createConnection();
     return { connection };
   })
@@ -159,9 +201,46 @@ suite
 
 ## Examples
 
-### Example 1: Array Operations Comparison
+### Example 1: Serialization Comparison (Dynamic Imports)
 
-This example compares different methods for copying array elements:
+This example shows the **critical pattern** of using dynamic imports for external modules:
+
+```typescript
+// serialization.ts
+import { randomUUID } from 'node:crypto';
+
+const suite = benchmark('10K strings', () => Array.from({ length: 10_000 }, () => randomUUID()));
+
+// ✅ CORRECT: Dynamic import inside target callback
+const v8Target = suite.target('V8', async () => {
+  const { serialize, deserialize } = await import('node:v8');
+  const gcBlock = new Set(); // Prevent GC during measurement
+  return { serialize, deserialize, gcBlock };
+});
+
+v8Target.measure('serialize', ({ serialize, gcBlock }, input) => {
+  gcBlock.add(serialize(input));
+});
+
+suite
+  .target('JSON', () => {
+    const gcBlock = new Set();
+    return { gcBlock };
+  })
+  .measure('serialize', ({ gcBlock }, input) => {
+    gcBlock.add(JSON.stringify(input));
+  });
+```
+
+**Key patterns:**
+
+- Dynamic imports (`await import()`) for modules needed in worker threads
+- Setup function returns context for measure functions
+- Using `gcBlock` Set to prevent garbage collection during measurements
+
+### Example 2: Array Operations with Multiple Feeds
+
+Compare different array copying methods across various data types:
 
 ```typescript
 // array-copy.ts
@@ -184,50 +263,69 @@ suite.target('copyWithin').measure('copy half', (_, input) => {
 });
 ```
 
-**Key insights from results:**
+**Results insights:**
 
 - `copyWithin` is ~5x faster for typed arrays
-- `for loop` performs consistently across all array types
-- Regular arrays have different performance characteristics than typed arrays
+- Multiple feeds test performance across different data types
+- Same measure name allows direct comparison
 
-### Example 2: Object Merging Strategies
+### Example 3: Object Merging Strategies
 
-Compare different approaches to merge arrays of objects:
+Compare five different approaches to merge arrays of objects:
 
 ```typescript
 // object-merge.ts
-import { Benchmark, printTableReports } from 'overtake';
+import { Benchmark, printSimpleReports } from '../build/index.js';
 
 const benchmark = new Benchmark('1K objects', () => Array.from({ length: 1_000 }, (_, idx) => ({ [idx]: idx })));
 
-benchmark.target('spread operator').measure('merge', (_, input) => {
-  return input.reduce((acc, obj) => ({ ...acc, ...obj }), {});
+// Slowest: Creates new object each iteration
+benchmark.target('reduce destructure').measure('data', (_, input) => {
+  input.reduce((acc, obj) => ({ ...acc, ...obj }), {});
 });
 
-benchmark.target('Object.assign in reduce').measure('merge', (_, input) => {
-  return input.reduce((acc, obj) => {
+// Faster: Mutates accumulator
+benchmark.target('reduce assign').measure('data', (_, input) => {
+  input.reduce((acc, obj) => {
     Object.assign(acc, obj);
     return acc;
   }, {});
 });
 
-benchmark.target('Object.assign spread').measure('merge', (_, input) => {
-  return Object.assign({}, ...input);
+// Similar performance to reduce assign
+benchmark.target('forEach assign').measure('data', (_, input) => {
+  const result = {};
+  input.forEach((obj) => Object.assign(result, obj));
+});
+
+// Classic for loop approach
+benchmark.target('for assign').measure('data', (_, input) => {
+  const result = {};
+  for (let i = 0; i < input.length; i++) {
+    Object.assign(result, input[i]);
+  }
+});
+
+// Fastest: Single Object.assign call
+benchmark.target('assign').measure('data', (_, input) => {
+  Object.assign({}, ...input);
 });
 
 const reports = await benchmark.execute({
-  reportTypes: ['ops', 'mean'],
+  reportTypes: ['ops'],
   maxCycles: 10_000,
 });
 
-printTableReports(reports);
+printSimpleReports(reports);
 ```
 
-**Key insights:**
+**Performance ranking (fastest to slowest):**
 
-- Spread operator in reduce is ~50% slower due to object recreation
-- `Object.assign` with spread is most concise and performant
-- Mutating approaches (assign in reduce) offer similar performance
+1. `Object.assign({}, ...input)` - Single call, highly optimized
+2. `for` loop with assign - Direct iteration
+3. `forEach` with assign - Similar to for loop
+4. `reduce` with assign - Functional but mutative
+5. `reduce` with spread - Creates new object each iteration (50% slower)
 
 ## CLI Usage
 

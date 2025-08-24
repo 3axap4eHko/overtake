@@ -2,9 +2,22 @@
   "name": "overtake",
   "version": "1.0.2",
   "description": "NodeJS performance benchmark",
-  "main": "build/index.js",
-  "types": "build/index.d.ts",
   "type": "module",
+  "types": "build/index.d.ts",
+  "main": "build/index.cjs",
+  "module": "build/index.js",
+  "exports": {
+    "types": "./build/index.d.ts",
+    "require": "./build/index.cjs",
+    "import": "./build/index.js"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "build/index.d.ts"
+      ]
+    }
+  },
   "bin": {
     "overtake": "bin/overtake.js"
   },
