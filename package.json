@@ -64,5 +64,6 @@
     "async": "^3.2.6",
     "commander": "^14.0.0",
     "glob": "^11.0.3"
-  }
+  },
+  "packageManager": "pnpm@10.15.0"
 }
