@@ -51,16 +51,16 @@
     "@swc/jest": "^0.2.39",
     "@types/async": "^3.2.25",
     "@types/jest": "^30.0.0",
-    "@types/node": "^24.2.0",
+    "@types/node": "^24.3.0",
     "husky": "^9.1.7",
-    "inop": "^0.7.8",
+    "inop": "^0.7.9",
     "jest": "^30.0.5",
     "prettier": "^3.6.2",
     "pretty-quick": "^4.2.2",
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@swc/core": "^1.13.3",
+    "@swc/core": "^1.13.5",
     "async": "^3.2.6",
     "commander": "^14.0.0",
     "glob": "^11.0.3"
