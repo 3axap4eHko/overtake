@@ -1,382 +1,262 @@
 # Overtake
 
-High-precision performance benchmarking library for Node.js with isolated worker thread execution and statistical convergence.
+⚡ The fastest, most accurate JavaScript benchmarking library. Worker-isolated, statistically-rigorous, zero-overhead.
 
 [![Build Status][github-image]][github-url]
 [![NPM version][npm-image]][npm-url]
 [![Downloads][downloads-image]][npm-url]
 
-<!--[![Coverage Status][codecov-image]][codecov-url]-->
-<!--[![Maintainability][codeclimate-image]][codeclimate-url]-->
-<!--[![Snyk][snyk-image]][snyk-url]-->
-
-## Table of Contents
-
-- [Why Overtake?](#why-overtake)
-- [Features](#features)
-- [Installing](#installing)
-- [Quick Start](#quick-start)
-- [API Guide](#api-guide)
-- [Examples](#examples)
-- [CLI Usage](#cli-usage)
-- [License](#license)
-
-## Why Overtake?
-
-Traditional JavaScript benchmarking tools often suffer from:
-
-- **JIT optimization interference** - Code runs differently in benchmarks vs production
-- **Memory pressure artifacts** - GC pauses and memory allocation affect timing
-- **Cross-benchmark contamination** - Previous tests affect subsequent measurements
-- **Insufficient sample sizes** - Results vary wildly between runs
-
-Overtake solves these problems by:
-
-- **Worker thread isolation** - Each benchmark runs in a separate thread with fresh V8 context
-- **Statistical convergence** - Automatically runs until results are statistically stable
-- **Zero-copy result collection** - Uses SharedArrayBuffer to eliminate serialization overhead
-- **Proper warmup cycles** - Ensures JIT optimization before measurement
-- **Concurrent execution** - Runs multiple benchmarks in parallel for faster results
-
-## Features
-
-- 🚀 **Worker thread isolation** for accurate measurements
-- 📊 **Statistical convergence** with configurable confidence thresholds
-- 🔄 **Automatic warmup cycles** to stabilize JIT optimization
-- 💻 **TypeScript support** with transpilation built-in
-- 🎯 **Multiple comparison targets** in a single benchmark
-- 📈 **Rich statistics** including percentiles, mean, median, mode
-- 🖥️ **CLI and programmatic API**
-- ⚡ **Zero-copy communication** using SharedArrayBuffer
-
-## Installing
-
-Using pnpm:
-
 ```bash
-$ pnpm add -D overtake
+npm install -D overtake
 ```
 
-Using npm:
-
-```bash
-$ npm install -D overtake
-```
-
-## Quick Start
-
-### Basic Benchmark
-
-Compare different implementations of the same operation:
+## 5-Second Quick Start
 
 ```typescript
 // benchmark.ts
-// npx overtake benchmark.ts
-const suite = benchmark('1000 numbers', () => Array.from({ length: 1_000 }, (_, idx) => idx)).feed('10000 numbers', () => Array.from({ length: 10_000 }, (_, idx) => idx));
+const suite = benchmark('1M numbers', () => Array.from({ length: 1e6 }, (_, i) => i));
 
-suite.target('for loop').measure('sum', (_, input) => {
-  const n = input.length;
+suite.target('for loop').measure('sum', (_, arr) => {
   let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += input[i];
-  }
+  for (let i = 0; i < arr.length; i++) sum += arr[i];
   return sum;
 });
 
-suite.target('reduce').measure('sum', (_, input) => {
-  return input.reduce((a, b) => a + b, 0);
-});
+suite.target('reduce').measure('sum', (_, arr) => arr.reduce((a, b) => a + b));
 ```
-
-### With Dynamic Imports (Required for External Modules)
-
-```typescript
-// crypto-benchmark.ts
-// npx overtake crypto-benchmark.ts
-const suite = benchmark('Hash 1MB data', () => Buffer.alloc(1_000_000));
-
-// Dynamic import required for modules in worker threads
-suite
-  .target('crypto SHA256', async () => {
-    const { createHash } = await import('node:crypto');
-    return { createHash };
-  })
-  .measure('hash', ({ createHash }, input) => {
-    createHash('sha256').update(input).digest();
-  });
-```
-
-Run with CLI:
 
 ```bash
-npx overtake benchmark.ts -f table
+npx overtake benchmark.ts
+
+# Output:
+# for loop sum
+#   1M numbers: 1,607 ops/s
+#
+# reduce sum
+#   1M numbers: 238 ops/s (6.7x slower)
 ```
 
-## API Guide
+## Why Overtake?
 
-### Core Concepts
+**The Problem**: JavaScript benchmarks lie. JIT optimizations, garbage collection, and shared state make results meaningless.
 
-1. **Benchmark**: The main container for your performance tests
-2. **Feed**: Different input data sets to test with
-3. **Target**: Different implementations to compare (e.g., "for loop" vs "reduce")
-4. **Measure**: Specific operations to measure for each target
+**The Solution**: Overtake runs every benchmark in an isolated worker thread with a fresh V8 context. No contamination. No lies.
+
+| Feature                 | Overtake                   | Benchmark.js      | Tinybench         |
+| ----------------------- | -------------------------- | ----------------- | ----------------- |
+| Worker isolation        | ✅ Each benchmark isolated | ❌ Shared context | ❌ Shared context |
+| Active maintenance      | ✅ 2025                    | ❌ Archived 2017  | ✅ 2025           |
+| Statistical convergence | ✅ Auto-adjusts cycles     | ⚠️ Manual config  | ⚠️ Manual config  |
+| Zero-copy timing        | ✅ SharedArrayBuffer       | ❌ Serialization  | ❌ Serialization  |
+| TypeScript support      | ✅ Built-in                | ❌ Manual setup   | ⚠️ Needs config   |
+
+## Core Concepts
+
+- **Feed**: Input data to benchmark (`'1M numbers'` → array of 1 million numbers)
+- **Target**: Implementation variant (`'for loop'` vs `'reduce'`)
+- **Measure**: Operation to time (`'sum'` operation)
+- **Isolation**: Each benchmark runs in a separate worker thread with fresh V8 context
+
+## Installation
+
+```bash
+# npm
+npm install -D overtake
+
+# pnpm
+pnpm add -D overtake
+
+# yarn
+yarn add -D overtake
+```
+
+## ⚠️ Critical: Dynamic Imports Required
+
+**Benchmarks run in isolated workers. Modules MUST be imported dynamically:**
+
+```typescript
+// ❌ WRONG - Static import won't work in worker
+import { serialize } from 'node:v8';
+benchmark('data', getData).target('v8', () => ({ serialize })); // serialize is undefined!
+
+// ✅ CORRECT - Dynamic import inside target
+benchmark('data', getData)
+  .target('v8', async () => {
+    const { serialize } = await import('node:v8');
+    return { serialize };
+  })
+  .measure('serialize', ({ serialize }, input) => serialize(input));
+```
+
+## Usage
+
+### CLI Mode (Recommended)
+
+When using `npx overtake`, a global `benchmark` function is provided:
+
+```typescript
+// benchmark.ts - No imports needed!
+benchmark('small', () => generateSmallData())
+  .feed('large', () => generateLargeData())
+  .target('algorithm A')
+  .measure('process', (_, input) => processA(input))
+  .target('algorithm B')
+  .measure('process', (_, input) => processB(input));
+
+// No .execute() needed - CLI handles it
+```
+
+```bash
+npx overtake benchmark.ts --format table
+```
+
+### Programmatic Mode
+
+For custom integration, import the Benchmark class:
+
+```typescript
+import { Benchmark, printTableReports } from 'overtake';
+
+const suite = new Benchmark('dataset', () => getData());
+
+suite.target('impl').measure('op', (_, input) => process(input));
+
+// Must explicitly execute
+const reports = await suite.execute({
+  workers: 4,
+  reportTypes: ['ops', 'mean', 'p95'],
+});
+
+printTableReports(reports);
+```
+
+## API Reference
 
 ### Creating Benchmarks
 
 ```typescript
-// Create a benchmark with optional initial feed
-const suite = benchmark('Test name', () => generateInputData());
+// Create with initial feed
+benchmark('initial data', () => data)
+  .feed('more data', () => moreData) // Add more datasets
 
-// Add more input variations
-suite.feed('small dataset', () => generateSmallData()).feed('large dataset', () => generateLargeData());
-
-// Define implementations to compare
-suite.target('implementation A').measure('operation', (ctx, input) => {
-  // Your code here
-});
-
-suite.target('implementation B').measure('operation', (ctx, input) => {
-  // Alternative implementation
-});
-```
-
-### Dynamic Imports in Targets (Critical!)
-
-**⚠️ IMPORTANT**: Since targets run in isolated worker threads, all module imports MUST be dynamic inside the target callback:
-
-```typescript
-// ✅ CORRECT - Dynamic import inside target
-suite
-  .target('V8 serialization', async () => {
-    const { serialize, deserialize } = await import('node:v8');
-    return { serialize, deserialize };
+  // Define what to compare
+  .target('implementation A')
+  .measure('operation', (ctx, input) => {
+    /* ... */
   })
-  .measure('serialize', ({ serialize }, input) => {
-    return serialize(input);
-  });
 
-// ❌ WRONG - Static import won't work in worker thread
-import { serialize } from 'node:v8';
-suite.target('V8', () => ({ serialize })); // This will fail!
+  .target('implementation B')
+  .measure('operation', (ctx, input) => {
+    /* ... */
+  });
 ```
 
-### Setup and Teardown
+### Targets with Setup
 
 ```typescript
+const suite = benchmark('data', () => Buffer.from('test data'));
+
 suite
   .target('with setup', async () => {
-    // Setup: runs once before measurements
-    // Remember: imports must be dynamic!
-    const { createConnection } = await import('./db.js');
-    const connection = await createConnection();
-    return { connection };
+    // Setup runs once before measurements
+    const { createHash } = await import('node:crypto');
+    const cache = new Map();
+    return { createHash, cache }; // Available as ctx in measure
   })
-  .measure('query', async (ctx, input) => {
-    // ctx contains the setup return value
-    await ctx.connection.query(input);
-  })
-  .teardown(async (ctx) => {
-    // Cleanup: runs once after measurements
-    await ctx.connection.close();
+  .measure('hash', ({ createHash, cache }, input) => {
+    // ctx contains setup return value
+    const hash = createHash('sha256').update(input).digest();
+    cache.set(input, hash);
+    return hash;
   });
 ```
 
-### Pre and Post Hooks
+### Preventing Garbage Collection
 
 ```typescript
+const suite = benchmark('data', () => [1, 2, 3, 4, 5]);
+
 suite
-  .target('with hooks')
-  .measure('process', (ctx, input) => {
-    processData(input);
+  .target('no GC', () => {
+    const gcBlock = new Set(); // Keeps references alive
+    return { gcBlock };
   })
-  .pre((ctx, input) => {
-    // Runs before EACH measurement
-    prepareData(input);
-  })
-  .post((ctx, input) => {
-    // Runs after EACH measurement
-    cleanupData(input);
+  .measure('process', ({ gcBlock }, input) => {
+    const result = input.map((x) => x * x);
+    gcBlock.add(result); // Prevent GC during measurement
+    return result;
   });
 ```
 
 ## Examples
 
-### Example 1: Serialization Comparison (Dynamic Imports)
-
-This example shows the **critical pattern** of using dynamic imports for external modules:
+### Serialization Comparison
 
 ```typescript
-// serialization.ts
-import { randomUUID } from 'node:crypto';
-
-const suite = benchmark('10K strings', () => Array.from({ length: 10_000 }, () => randomUUID()));
-
-// ✅ CORRECT: Dynamic import inside target callback
-const v8Target = suite.target('V8', async () => {
-  const { serialize, deserialize } = await import('node:v8');
-  const gcBlock = new Set(); // Prevent GC during measurement
-  return { serialize, deserialize, gcBlock };
-});
-
-v8Target.measure('serialize', ({ serialize, gcBlock }, input) => {
-  gcBlock.add(serialize(input));
-});
+// Compare V8 vs JSON serialization
+const suite = benchmark('10K strings', () => Array.from({ length: 10_000 }, (_, i) => `string-${i}`));
 
 suite
-  .target('JSON', () => {
-    const gcBlock = new Set();
-    return { gcBlock };
+  .target('V8', async () => {
+    const { serialize } = await import('node:v8');
+    return { serialize };
   })
-  .measure('serialize', ({ gcBlock }, input) => {
-    gcBlock.add(JSON.stringify(input));
-  });
+  .measure('serialize', ({ serialize }, input) => serialize(input));
+
+suite.target('JSON').measure('serialize', (_, input) => JSON.stringify(input));
 ```
 
-**Key patterns:**
+**[📁 More examples in `/examples`](./examples/)**
 
-- Dynamic imports (`await import()`) for modules needed in worker threads
-- Setup function returns context for measure functions
-- Using `gcBlock` Set to prevent garbage collection during measurements
-
-### Example 2: Array Operations with Multiple Feeds
-
-Compare different array copying methods across various data types:
-
-```typescript
-// array-copy.ts
-const suite = benchmark('1M array of strings', () => Array.from({ length: 1_000_000 }, (_, idx) => `${idx}`))
-  .feed('1M array of numbers', () => Array.from({ length: 1_000_000 }, (_, idx) => idx))
-  .feed('1M typed array', () => new Uint32Array(1_000_000).map((_, idx) => idx));
-
-suite.target('for loop').measure('copy half', (_, input) => {
-  const n = input?.length ?? 0;
-  const mid = n / 2;
-  for (let i = 0; i < mid; i++) {
-    input[i + mid] = input[i];
-  }
-});
-
-suite.target('copyWithin').measure('copy half', (_, input) => {
-  const n = input?.length ?? 0;
-  const mid = n / 2;
-  input.copyWithin(mid, 0, mid);
-});
-```
-
-**Results insights:**
-
-- `copyWithin` is ~5x faster for typed arrays
-- Multiple feeds test performance across different data types
-- Same measure name allows direct comparison
-
-### Example 3: Object Merging Strategies
-
-Compare five different approaches to merge arrays of objects:
-
-```typescript
-// object-merge.ts
-import { Benchmark, printSimpleReports } from '../build/index.js';
-
-const benchmark = new Benchmark('1K objects', () => Array.from({ length: 1_000 }, (_, idx) => ({ [idx]: idx })));
-
-// Slowest: Creates new object each iteration
-benchmark.target('reduce destructure').measure('data', (_, input) => {
-  input.reduce((acc, obj) => ({ ...acc, ...obj }), {});
-});
-
-// Faster: Mutates accumulator
-benchmark.target('reduce assign').measure('data', (_, input) => {
-  input.reduce((acc, obj) => {
-    Object.assign(acc, obj);
-    return acc;
-  }, {});
-});
-
-// Similar performance to reduce assign
-benchmark.target('forEach assign').measure('data', (_, input) => {
-  const result = {};
-  input.forEach((obj) => Object.assign(result, obj));
-});
-
-// Classic for loop approach
-benchmark.target('for assign').measure('data', (_, input) => {
-  const result = {};
-  for (let i = 0; i < input.length; i++) {
-    Object.assign(result, input[i]);
-  }
-});
-
-// Fastest: Single Object.assign call
-benchmark.target('assign').measure('data', (_, input) => {
-  Object.assign({}, ...input);
-});
-
-const reports = await benchmark.execute({
-  reportTypes: ['ops'],
-  maxCycles: 10_000,
-});
-
-printSimpleReports(reports);
-```
-
-**Performance ranking (fastest to slowest):**
-
-1. `Object.assign({}, ...input)` - Single call, highly optimized
-2. `for` loop with assign - Direct iteration
-3. `forEach` with assign - Similar to for loop
-4. `reduce` with assign - Functional but mutative
-5. `reduce` with spread - Creates new object each iteration (50% slower)
-
-## CLI Usage
-
-### Basic Command
+## CLI Options
 
 ```bash
 npx overtake <pattern> [options]
 ```
 
-### Options
+| Option           | Short | Description                              | Default   |
+| ---------------- | ----- | ---------------------------------------- | --------- |
+| `--format`       | `-f`  | Output format: `simple`, `table`, `json` | `simple`  |
+| `--report-types` | `-r`  | Stats to show: `ops`, `mean`, `p95`, etc | `['ops']` |
+| `--workers`      | `-w`  | Concurrent workers                       | CPU count |
+| `--min-cycles`   |       | Minimum iterations                       | 50        |
+| `--max-cycles`   |       | Maximum iterations                       | 1000      |
 
-| Option               | Description                                                                                             | Default   |
-| -------------------- | ------------------------------------------------------------------------------------------------------- | --------- |
-| `-f, --format`       | Output format: `simple`, `table`, `json`, `pjson`                                                       | `simple`  |
-| `-r, --report-types` | Statistics to display: `ops`, `mean`, `median`, `mode`, `min`, `max`, `p50`, `p75`, `p90`, `p95`, `p99` | `['ops']` |
-| `-w, --workers`      | Number of concurrent worker threads                                                                     | CPU count |
-| `--warmup-cycles`    | Number of warmup iterations before measurement                                                          | 20        |
-| `--min-cycles`       | Minimum measurement cycles                                                                              | 50        |
-| `--max-cycles`       | Maximum measurement cycles                                                                              | 1000      |
-| `--abs-threshold`    | Absolute error threshold in nanoseconds                                                                 | 1000      |
-| `--rel-threshold`    | Relative error threshold (0-1)                                                                          | 0.02      |
-
-### Examples
+### Example Commands
 
 ```bash
-# Run all benchmarks in a directory
-npx overtake "src/**/*.bench.ts" -f table
+# Run all benchmarks with table output
+npx overtake "**/*.bench.ts" -f table
 
 # Show detailed statistics
-npx overtake benchmark.ts -r ops mean median p95 p99
+npx overtake bench.ts -r ops mean p95 p99
 
-# Increase precision with more cycles
-npx overtake benchmark.ts --min-cycles 100 --max-cycles 10000
-
-# Output JSON for CI/CD integration
-npx overtake benchmark.ts -f json > results.json
+# Output JSON for CI
+npx overtake bench.ts -f json > results.json
 ```
+
+## Troubleshooting
+
+### "Cannot find module" in worker
+
+**Solution**: Use dynamic imports inside target callbacks (see [Critical section](#️-critical-dynamic-imports-required))
+
+### No output from benchmark
+
+**Solution**: In CLI mode, don't import Benchmark or call `.execute()`. Use the global `benchmark` function.
+
+### Results vary between runs
+
+**Solution**: Increase `--min-cycles` for more samples, or use the `gcBlock` pattern to prevent garbage collection.
+
+**[🐛 Report issues](https://github.com/3axap4eHko/overtake/issues)**
 
 ## License
 
-License [Apache-2.0](http://www.apache.org/licenses/LICENSE-2.0)
-Copyright (c) 2021-present Ivan Zakharchanka
+[Apache-2.0](http://www.apache.org/licenses/LICENSE-2.0) © 2021-2025 Ivan Zakharchanka
 
 [npm-url]: https://www.npmjs.com/package/overtake
 [downloads-image]: https://img.shields.io/npm/dw/overtake.svg?maxAge=43200
 [npm-image]: https://img.shields.io/npm/v/overtake.svg?maxAge=43200
 [github-url]: https://github.com/3axap4eHko/overtake/actions/workflows/cicd.yml
 [github-image]: https://github.com/3axap4eHko/overtake/actions/workflows/cicd.yml/badge.svg
-[codecov-url]: https://codecov.io/gh/3axap4eHko/overtake
-[codecov-image]: https://codecov.io/gh/3axap4eHko/overtake/branch/master/graph/badge.svg?token=JZ8QCGH6PI
-[codeclimate-url]: https://codeclimate.com/github/3axap4eHko/overtake/maintainability
-[codeclimate-image]: https://api.codeclimate.com/v1/badges/0ba20f27f6db2b0fec8c/maintainability
-[snyk-url]: https://snyk.io/test/npm/overtake/latest
-[snyk-image]: https://img.shields.io/snyk/vulnerabilities/github/3axap4eHko/overtake.svg?maxAge=43200

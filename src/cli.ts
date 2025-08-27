@@ -1,7 +1,7 @@
 import { createRequire, Module } from 'node:module';
 import { SyntheticModule, createContext, SourceTextModule } from 'node:vm';
 import { stat, readFile } from 'node:fs/promises';
-import { parse, print } from '@swc/core';
+import { transform } from '@swc/core';
 import { Command, Option } from 'commander';
 import { glob } from 'glob';
 import { Benchmark, printTableReports, printJSONReports, printSimpleReports, DEFAULT_REPORT_TYPES, DEFAULT_WORKERS } from './index.js';
@@ -13,22 +13,18 @@ const { name, description, version } = require('../package.json');
 const commander = new Command();
 
 const transpile = async (code: string): Promise<string> => {
-  const ast = await parse(code, {
-    syntax: 'typescript',
-    dynamicImport: true,
-    target: 'esnext',
-  });
-
-  const output = await print(ast, {
-    module: {
-      type: 'es6',
-    },
+  const output = await transform(code, {
+    filename: 'benchmark.ts',
     jsc: {
-      target: 'esnext',
       parser: {
         syntax: 'typescript',
+        tsx: false,
+        dynamicImport: true,
       },
-      experimental: {},
+      target: 'esnext',
+    },
+    module: {
+      type: 'es6',
     },
   });
   return output.code;
