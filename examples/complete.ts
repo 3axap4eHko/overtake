@@ -29,7 +29,7 @@ v8Target
     // executed before measurement
   })
   .post(async (_ctx, _input) => {
-    // executed before measurement
+    // executed after measurement
   });
 
 v8Target
@@ -64,11 +64,11 @@ jsonTarget
     // executed before measurement
   })
   .post(async (_ctx, _input) => {
-    // executed before measurement
+    // executed after measurement
   });
 
 jsonTarget
-  .measure('parsse', ({ parse, serialized }) => {
+  .measure('parse', ({ parse, serialized }) => {
     parse(serialized);
   })
   .pre(async (ctx, input) => {

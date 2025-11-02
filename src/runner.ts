@@ -48,6 +48,9 @@ export const benchmark = async <TContext, TInput>({
     await pre?.(context, data!);
     const result = runRaw(context, data!);
     await post?.(context, data!);
+    global.gc?.();
+    global.gc?.();
+
     const run = result instanceof Promise ? runAsync(runRaw) : runSync(runRaw);
     const start = Date.now();
     while (Date.now() - start < 1_000) {
@@ -57,6 +60,8 @@ export const benchmark = async <TContext, TInput>({
       await pre?.(context, data!);
       await run(context, data);
       await post?.(context, data!);
+      global.gc?.();
+      global.gc?.();
     }
 
     let i = 0;
@@ -69,6 +74,8 @@ export const benchmark = async <TContext, TInput>({
       await pre?.(context, data!);
       const duration = await run(context, data);
       await post?.(context, data!);
+      global.gc?.();
+      global.gc?.();
 
       durations[i++] = duration;
       const delta = duration - mean;

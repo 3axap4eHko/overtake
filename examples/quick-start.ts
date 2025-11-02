@@ -1,16 +1,15 @@
-// run using the following command
-// npx overtake examples/quick-start.ts
+// Minimal example - comparing array sum algorithms
+// Run: npx overtake examples/quick-start.ts
 
-const sumSuite = benchmark('1M array', () => Array.from({ length: 1_000_000 }, (_, idx) => idx));
+const sumBenchmark = benchmark('1M numbers', () => Array.from({ length: 1_000_000 }, (_, index) => index));
 
-sumSuite.target('for loop').measure('sum', (_, input) => {
-  const n = input.length;
+sumBenchmark.target('for loop').measure('sum', (_, numbers) => {
   let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += input[i];
+  for (let i = 0; i < numbers.length; i++) {
+    sum += numbers[i];
   }
 });
 
-sumSuite.target('reduce').measure('sum', (_, input) => {
-  input.reduce((a, b) => a + b, 0);
+sumBenchmark.target('reduce').measure('sum', (_, numbers) => {
+  numbers.reduce((accumulator, current) => accumulator + current, 0);
 });

@@ -19,10 +19,11 @@ const suite = benchmark('1M numbers', () => Array.from({ length: 1e6 }, (_, i) =
 suite.target('for loop').measure('sum', (_, arr) => {
   let sum = 0;
   for (let i = 0; i < arr.length; i++) sum += arr[i];
-  return sum;
 });
 
-suite.target('reduce').measure('sum', (_, arr) => arr.reduce((a, b) => a + b));
+suite.target('reduce').measure('sum', (_, arr) => {
+  arr.reduce((a, b) => a + b);
+});
 ```
 
 ```bash
@@ -85,8 +86,35 @@ benchmark('data', getData)
     const { serialize } = await import('node:v8');
     return { serialize };
   })
-  .measure('serialize', ({ serialize }, input) => serialize(input));
+  .measure('serialize', ({ serialize }, input) => {
+    serialize(input);
+  });
 ```
+
+### Importing Local Files
+
+**Important**: Dynamic imports inside target functions resolve relative to the worker location (`node_modules/overtake/build/worker.js`), not your project root. For local files, you must construct absolute paths:
+
+````typescript
+// ❌ WRONG - Relative path resolves from worker location
+.target('myImpl', async () => {
+  const { myFunc } = await import('./utils/myModule.js'); // Error: looks in node_modules/overtake/build/utils/
+  return { myFunc };
+})
+
+// ✅ CORRECT - Build absolute path inside the function
+.target('myImpl', async () => {
+  const { join } = await import('node:path');
+  const modulePath = join(process.cwd(), './utils/myModule.js');
+  const { myFunc } = await import(modulePath);
+  return { myFunc };
+})
+
+// ✅ ALSO CORRECT - For node_modules packages
+.target('lib', async () => {
+  const { someFunc } = await import('my-package');
+  return { someFunc };
+})
 
 ## Usage
 
@@ -99,12 +127,14 @@ When using `npx overtake`, a global `benchmark` function is provided:
 benchmark('small', () => generateSmallData())
   .feed('large', () => generateLargeData())
   .target('algorithm A')
-  .measure('process', (_, input) => processA(input))
+  .measure('process', (_, input) => {
+    processA(input);
+  })
   .target('algorithm B')
-  .measure('process', (_, input) => processB(input));
-
-// No .execute() needed - CLI handles it
-```
+  .measure('process', (_, input) => {
+    processB(input);
+  });
+````
 
 ```bash
 npx overtake benchmark.ts --format table
@@ -119,7 +149,9 @@ import { Benchmark, printTableReports } from 'overtake';
 
 const suite = new Benchmark('dataset', () => getData());
 
-suite.target('impl').measure('op', (_, input) => process(input));
+suite.target('impl').measure('op', (_, input) => {
+  process(input);
+});
 
 // Must explicitly execute
 const reports = await suite.execute({
@@ -167,7 +199,6 @@ suite
     // ctx contains setup return value
     const hash = createHash('sha256').update(input).digest();
     cache.set(input, hash);
-    return hash;
   });
 ```
 
@@ -184,29 +215,45 @@ suite
   .measure('process', ({ gcBlock }, input) => {
     const result = input.map((x) => x * x);
     gcBlock.add(result); // Prevent GC during measurement
-    return result;
   });
 ```
 
 ## Examples
 
-### Serialization Comparison
+### Compare Algorithms
 
 ```typescript
-// Compare V8 vs JSON serialization
-const suite = benchmark('10K strings', () => Array.from({ length: 10_000 }, (_, i) => `string-${i}`));
+// examples/quick-start.ts
+const sumBenchmark = benchmark('1M numbers', () => Array.from({ length: 1_000_000 }, (_, i) => i));
 
-suite
-  .target('V8', async () => {
-    const { serialize } = await import('node:v8');
-    return { serialize };
-  })
-  .measure('serialize', ({ serialize }, input) => serialize(input));
+sumBenchmark.target('for loop').measure('sum', (_, numbers) => {
+  let sum = 0;
+  for (let i = 0; i < numbers.length; i++) sum += numbers[i];
+});
 
-suite.target('JSON').measure('serialize', (_, input) => JSON.stringify(input));
+sumBenchmark.target('reduce').measure('sum', (_, numbers) => {
+  numbers.reduce((a, b) => a + b, 0);
+});
 ```
 
-**[📁 More examples in `/examples`](./examples/)**
+### Import Local Modules
+
+```typescript
+// examples/imports.ts - Correct way to import local files
+.target('local files', async () => {
+  const { join } = await import('node:path');
+  const modulePath = join(process.cwd(), './build/myModule.js');
+  const { myFunction } = await import(modulePath);
+  return { myFunction };
+})
+```
+
+**[📁 See all examples](./examples/):**
+
+- `quick-start.ts` - Minimal benchmark example
+- `complete.ts` - All features (setup/teardown, pre/post hooks, multiple feeds)
+- `imports.ts` - Import patterns and memory management
+- `custom-reports.ts` - Statistics and custom report types
 
 ## CLI Options
 

@@ -26,7 +26,7 @@ const pre: StepFn<unknown, unknown> = preCode && Function(`return ${preCode};`)(
 const run: StepFn<unknown, unknown> = runCode && Function(`return ${runCode};`)();
 const post: StepFn<unknown, unknown> = postCode && Function(`return ${postCode};`)();
 
-const exitCode = await benchmark({
+export const exitCode = await benchmark({
   setup,
   teardown,
   pre,

@@ -59,7 +59,10 @@ commander
           return instance;
         };
         const script = new SourceTextModule(code, {
-          context: createContext({ benchmark }),
+          context: createContext({
+            benchmark,
+            Buffer,
+          }),
         });
         const imports = new Map();
         await script.link(async (specifier: string, referencingModule) => {
