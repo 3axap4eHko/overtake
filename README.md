@@ -71,50 +71,46 @@ pnpm add -D overtake
 yarn add -D overtake
 ```
 
-## ⚠️ Critical: Dynamic Imports Required
+## ⚠️ Critical: Capture-Free Functions Required
 
-**Benchmarks run in isolated workers. Modules MUST be imported dynamically:**
+Functions you pass to `target/measure/setup/pre/post` are stringified and re-evaluated in a worker. Anything they close over (including statically imported bindings) is **not** available. Pull dependencies inside the function body—typically with `await import(...)`.
 
 ```typescript
-// ❌ WRONG - Static import won't work in worker
+// ❌ WRONG: closes over serialize; it is undefined in the worker
 import { serialize } from 'node:v8';
-benchmark('data', getData).target('v8', () => ({ serialize })); // serialize is undefined!
+benchmark('data', getData).target('v8', () => ({ serialize }));
 
-// ✅ CORRECT - Dynamic import inside target
+// ✅ CORRECT: import inside the worker-run function
 benchmark('data', getData)
   .target('v8', async () => {
     const { serialize } = await import('node:v8');
     return { serialize };
   })
-  .measure('serialize', ({ serialize }, input) => {
-    serialize(input);
-  });
+  .measure('serialize', ({ serialize }, input) => serialize(input));
 ```
 
 ### Importing Local Files
 
-**Important**: Dynamic imports inside target functions resolve relative to the worker location (`node_modules/overtake/build/worker.js`), not your project root. For local files, you must construct absolute paths:
+- **CLI mode (`npx overtake`)**: `baseUrl` is set to the benchmark file, so `await import('./helper.js')` works.
+- **Programmatic mode (`suite.execute`)**: pass `baseUrl: import.meta.url` (the benchmark’s file URL) so relative imports resolve correctly. If you omit it, Overtake falls back to `process.cwd()` and relative imports may fail.
 
-````typescript
-// ❌ WRONG - Relative path resolves from worker location
-.target('myImpl', async () => {
-  const { myFunc } = await import('./utils/myModule.js'); // Error: looks in node_modules/overtake/build/utils/
-  return { myFunc };
-})
+```typescript
+// CLI usage – relative path is fine
+benchmark('local', () => 1)
+  .target('helper', async () => {
+    const { helper } = await import('./helpers.js');
+    return { helper };
+  })
+  .measure('use helper', ({ helper }) => helper());
 
-// ✅ CORRECT - Build absolute path inside the function
-.target('myImpl', async () => {
-  const { join } = await import('node:path');
-  const modulePath = join(process.cwd(), './utils/myModule.js');
-  const { myFunc } = await import(modulePath);
-  return { myFunc };
-})
-
-// ✅ ALSO CORRECT - For node_modules packages
-.target('lib', async () => {
-  const { someFunc } = await import('my-package');
-  return { someFunc };
-})
+// Programmatic usage – provide baseUrl
+const suite = new Benchmark('local');
+suite.target('helper', async () => {
+  const { helper } = await import('./helpers.js');
+  return { helper };
+});
+await suite.execute({ baseUrl: import.meta.url });
+```
 
 ## Usage
 
@@ -134,7 +130,7 @@ benchmark('small', () => generateSmallData())
   .measure('process', (_, input) => {
     processB(input);
   });
-````
+```
 
 ```bash
 npx overtake benchmark.ts --format table

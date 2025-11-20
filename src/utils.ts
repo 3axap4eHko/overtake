@@ -1,3 +1,5 @@
+import { transform } from '@swc/core';
+
 export const abs = (value: bigint) => {
   if (value < 0n) {
     return -value;
@@ -63,3 +65,21 @@ export class ScaledBigInt {
     return Number(div(this.value, this.scale));
   }
 }
+
+export const transpile = async (code: string): Promise<string> => {
+  const output = await transform(code, {
+    filename: 'benchmark.ts',
+    jsc: {
+      parser: {
+        syntax: 'typescript',
+        tsx: false,
+        dynamicImport: true,
+      },
+      target: 'esnext',
+    },
+    module: {
+      type: 'es6',
+    },
+  });
+  return output.code;
+};

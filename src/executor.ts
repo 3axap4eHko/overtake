@@ -1,27 +1,31 @@
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
 import { queue } from 'async';
-import { RunOptions, ReportOptions, WorkerOptions, BenchmarkOptions, Control, ReportType, ReportTypeList, CONTROL_SLOTS } from './types.js';
+import { pathToFileURL } from 'node:url';
 import { createReport, Report } from './reporter.js';
 import { cmp } from './utils.js';
+import { RunOptions, ReportOptions, WorkerOptions, BenchmarkOptions, Control, ReportType, ReportTypeList, CONTROL_SLOTS } from './types.js';
 
 export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report> & { count: number };
 
 export interface ExecutorOptions<R extends ReportTypeList> extends BenchmarkOptions, ReportOptions<R> {
+  baseUrl?: string;
   workers?: number;
   maxCycles?: number;
 }
 
 export const createExecutor = <TContext, TInput, R extends ReportTypeList>({
+  baseUrl = pathToFileURL(process.cwd()).href,
   workers,
   warmupCycles,
   maxCycles,
   minCycles,
   absThreshold,
   relThreshold,
+  gcObserver = true,
   reportTypes,
 }: Required<ExecutorOptions<R>>) => {
-  const executor = queue<RunOptions<TContext, TInput>>(async ({ setup, teardown, pre, run, post, data }) => {
+  const executor = queue<RunOptions<TContext, TInput>>(async ({ baseUrl: runBaseUrl = baseUrl, setup, teardown, pre, run, post, data }) => {
     const setupCode = setup?.toString();
     const teardownCode = teardown?.toString();
     const preCode = pre?.toString();
@@ -33,6 +37,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>({
 
     const workerFile = new URL('./worker.js', import.meta.url);
     const workerData: WorkerOptions = {
+      baseUrl: runBaseUrl,
       setupCode,
       teardownCode,
       preCode,
@@ -44,6 +49,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>({
       minCycles,
       absThreshold,
       relThreshold,
+      gcObserver,
 
       controlSAB,
       durationsSAB,

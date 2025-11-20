@@ -1,4 +1,5 @@
 import { cpus } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { createExecutor, ExecutorOptions, ExecutorReport } from './executor.js';
 import { MaybePromise, StepFn, SetupFn, TeardownFn, FeedFn, ReportType, ReportTypeList, DEFAULT_CYCLES } from './types.js';
 
@@ -141,20 +142,29 @@ export class Benchmark<TInput> {
     minCycles = 50,
     absThreshold = 1_000,
     relThreshold = 0.02,
+    gcObserver = true,
     reportTypes = DEFAULT_REPORT_TYPES as unknown as R,
+    baseUrl,
   }: ExecutorOptions<R>): Promise<TargetReport<R>[]> {
     if (this.#executed) {
       throw new Error("Benchmark is executed and can't be reused");
     }
     this.#executed = true;
 
+    const resolvedBaseUrl = baseUrl ?? pathToFileURL(process.cwd()).href;
+    if (!baseUrl) {
+      console.warn("Overtake: baseUrl not provided; defaulting to process.cwd(). Pass the benchmark's import.meta.url so relative imports resolve correctly.");
+    }
+
     const executor = createExecutor<unknown, TInput, R>({
+      baseUrl: resolvedBaseUrl,
       workers,
       warmupCycles,
       maxCycles,
       minCycles,
       absThreshold,
       relThreshold,
+      gcObserver,
       reportTypes,
     });
 
@@ -167,6 +177,7 @@ export class Benchmark<TInput> {
           const data = await feed.fn?.();
           executor
             .push<ExecutorReport<R>>({
+              baseUrl: resolvedBaseUrl,
               setup: target.setup,
               teardown: target.teardown,
               pre: measure.pre,

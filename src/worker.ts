@@ -1,8 +1,12 @@
 import { workerData } from 'node:worker_threads';
+import { SourceTextModule, SyntheticModule, createContext } from 'node:vm';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { benchmark } from './runner.js';
-import { SetupFn, TeardownFn, StepFn, WorkerOptions } from './types.js';
+import { WorkerOptions } from './types.js';
 
 const {
+  baseUrl,
   setupCode,
   teardownCode,
   preCode,
@@ -14,19 +18,66 @@ const {
   minCycles,
   absThreshold,
   relThreshold,
+  gcObserver = true,
 
   durationsSAB,
   controlSAB,
 }: WorkerOptions = workerData;
 
-const setup: SetupFn<unknown> = setupCode && Function(`return ${setupCode};`)();
-const teardown: TeardownFn<unknown> = teardownCode && Function(`return ${teardownCode};`)();
+const serialize = (code?: string) => (code ? code : '() => {}');
 
-const pre: StepFn<unknown, unknown> = preCode && Function(`return ${preCode};`)();
-const run: StepFn<unknown, unknown> = runCode && Function(`return ${runCode};`)();
-const post: StepFn<unknown, unknown> = postCode && Function(`return ${postCode};`)();
+const source = `
+export const setup = ${serialize(setupCode)};
+export const teardown = ${serialize(teardownCode)};
+export const pre = ${serialize(preCode)};
+export const run = ${serialize(runCode)};
+export const post = ${serialize(postCode)};
+  `;
 
-export const exitCode = await benchmark({
+const context = createContext({ console, Buffer });
+const imports = new Map<string, SyntheticModule>();
+const mod = new SourceTextModule(source, {
+  identifier: baseUrl,
+  context,
+  initializeImportMeta(meta) {
+    meta.url = baseUrl;
+  },
+  importModuleDynamically(specifier, referencingModule) {
+    const base = referencingModule.identifier ?? baseUrl;
+    const resolveFrom = createRequire(fileURLToPath(base));
+    return import(resolveFrom.resolve(specifier));
+  },
+});
+
+await mod.link(async (specifier, referencingModule) => {
+  const base = referencingModule.identifier ?? baseUrl;
+  const resolveFrom = createRequire(fileURLToPath(base));
+  const target = resolveFrom.resolve(specifier);
+  const cached = imports.get(target);
+  if (cached) return cached;
+
+  const importedModule = await import(target);
+  const exportNames = Object.keys(importedModule);
+  const imported = new SyntheticModule(
+    exportNames,
+    () => {
+      exportNames.forEach((key) => imported.setExport(key, importedModule[key]));
+    },
+    { identifier: target, context: referencingModule.context },
+  );
+  imports.set(target, imported);
+  return imported;
+});
+
+await mod.evaluate();
+const { setup, teardown, pre, run, post } = mod.namespace as any;
+
+if (!run) {
+  throw new Error('Benchmark run function is required');
+}
+
+process.exitCode = await benchmark({
+  baseUrl,
   setup,
   teardown,
   pre,
@@ -38,9 +89,8 @@ export const exitCode = await benchmark({
   minCycles,
   absThreshold,
   relThreshold,
+  gcObserver,
 
   durationsSAB,
   controlSAB,
 });
-
-process.exit(exitCode);

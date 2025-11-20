@@ -1,5 +1,6 @@
 // Demonstrates correct import patterns for worker context
 // Run: npx overtake examples/imports.ts
+import 'overtake';
 
 const importExamples = benchmark('test data', () => Buffer.from('hello world'));
 
@@ -13,14 +14,9 @@ importExamples
     createHash('sha256').update(buffer).digest('hex');
   });
 
-// IMPORTANT: Local files need absolute paths
-// Relative imports resolve from node_modules/overtake/build/, not your project
+// Relative imports resolve relative to benchmark file
 const localFilesTarget = importExamples.target('local files', async () => {
-  const { join } = await import('node:path');
-
-  // Build absolute path to your local module
-  const localModulePath = join(process.cwd(), './build/types.js');
-  const { DEFAULT_CYCLES, Control } = await import(localModulePath);
+  const { DEFAULT_CYCLES, Control } = await import('../build/types.js');
 
   return {
     DEFAULT_CYCLES,
