@@ -26,6 +26,20 @@ const {
 
 const serialize = (code?: string) => (code ? code : '() => {}');
 
+const isCjs = typeof require !== 'undefined';
+
+const resolveSpecifier = (specifier: string, parent: string) => {
+  if (!isCjs) {
+    try {
+      return import.meta.resolve(specifier, parent);
+    } catch {
+      // fall through to CommonJS resolution
+    }
+  }
+  const resolveFrom = createRequire(fileURLToPath(parent));
+  return resolveFrom.resolve(specifier);
+};
+
 const source = `
 export const setup = ${serialize(setupCode)};
 export const teardown = ${serialize(teardownCode)};
@@ -44,15 +58,14 @@ const mod = new SourceTextModule(source, {
   },
   importModuleDynamically(specifier, referencingModule) {
     const base = referencingModule.identifier ?? baseUrl;
-    const resolveFrom = createRequire(fileURLToPath(base));
-    return import(resolveFrom.resolve(specifier));
+    const resolved = resolveSpecifier(specifier, base);
+    return import(resolved);
   },
 });
 
 await mod.link(async (specifier, referencingModule) => {
   const base = referencingModule.identifier ?? baseUrl;
-  const resolveFrom = createRequire(fileURLToPath(base));
-  const target = resolveFrom.resolve(specifier);
+  const target = resolveSpecifier(specifier, base);
   const cached = imports.get(target);
   if (cached) return cached;
 

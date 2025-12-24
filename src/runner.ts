@@ -23,6 +23,10 @@ const runAsync = (run: Function) => {
   };
 };
 
+const isThenable = (value: unknown): value is PromiseLike<unknown> => {
+  return value !== null && (typeof value === 'object' || typeof value === 'function') && typeof (value as PromiseLike<unknown>).then === 'function';
+};
+
 const TARGET_SAMPLE_NS = 1_000_000n; // aim for ~1ms per measured sample
 const MAX_BATCH = 1_048_576;
 const PROGRESS_STRIDE = 16;
@@ -198,7 +202,7 @@ export const benchmark = async <TContext, TInput>({
 
   const context = (await setup?.()) as TContext;
   const maxCycles = durations.length;
-  const gcWatcher = new GCWatcher();
+  const gcWatcher = gcObserver ? new GCWatcher() : null;
   const gcTracker = gcObserver ? createGCTracker() : null;
 
   try {
@@ -206,7 +210,7 @@ export const benchmark = async <TContext, TInput>({
     await pre?.(context, data!);
     const probeStart = hr();
     const probeResult = runRaw(context, data!);
-    const isAsync = probeResult instanceof Promise;
+    const isAsync = isThenable(probeResult);
     if (isAsync) {
       await probeResult;
     }
@@ -282,7 +286,7 @@ export const benchmark = async <TContext, TInput>({
     while (true) {
       if (i >= maxCycles) break;
 
-      const gcMarker = gcWatcher.start();
+      const gcMarker = gcWatcher?.start();
       const sampleStart = performance.now();
       let sampleDuration = 0n;
       for (let b = 0; b < batchSize; b++) {
@@ -298,7 +302,7 @@ export const benchmark = async <TContext, TInput>({
       sampleDuration /= BigInt(batchSize);
 
       const sampleEnd = performance.now();
-      const gcNoise = gcWatcher.seen(gcMarker) || (gcTracker?.overlaps(sampleStart, sampleEnd) ?? false);
+      const gcNoise = (gcMarker ? gcWatcher!.seen(gcMarker) : false) || (gcTracker?.overlaps(sampleStart, sampleEnd) ?? false);
       if (gcNoise) {
         continue;
       }
