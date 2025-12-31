@@ -10,6 +10,7 @@ import { REPORT_TYPES } from './types.js';
 
 const require = createRequire(import.meta.url);
 const { name, description, version } = require('../package.json');
+const BENCHMARK_URL = Symbol.for('overtake.benchmarkUrl');
 
 const commander = new Command();
 
@@ -97,8 +98,8 @@ commander
         if (instance) {
           const reports = await instance.execute({
             ...executeOptions,
-            baseUrl: identifier,
-          });
+            [BENCHMARK_URL]: identifier,
+          } as typeof executeOptions);
           switch (executeOptions.format) {
             case 'json':
               {

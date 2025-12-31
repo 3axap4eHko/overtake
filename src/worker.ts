@@ -1,12 +1,13 @@
 import { workerData } from 'node:worker_threads';
 import { SourceTextModule, SyntheticModule, createContext } from 'node:vm';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { isAbsolute } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { benchmark } from './runner.js';
 import { WorkerOptions } from './types.js';
 
 const {
-  baseUrl,
+  benchmarkUrl,
   setupCode,
   teardownCode,
   preCode,
@@ -26,18 +27,21 @@ const {
 
 const serialize = (code?: string) => (code ? code : '() => {}');
 
-const isCjs = typeof require !== 'undefined';
+const resolvedBenchmarkUrl = typeof benchmarkUrl === 'string' ? benchmarkUrl : pathToFileURL(process.cwd()).href;
+const benchmarkDirUrl = new URL('.', resolvedBenchmarkUrl).href;
+const requireFrom = createRequire(fileURLToPath(new URL('benchmark.js', benchmarkDirUrl)));
 
-const resolveSpecifier = (specifier: string, parent: string) => {
-  if (!isCjs) {
-    try {
-      return import.meta.resolve(specifier, parent);
-    } catch {
-      // fall through to CommonJS resolution
-    }
+const resolveSpecifier = (specifier: string) => {
+  if (specifier.startsWith('file:')) {
+    return specifier;
   }
-  const resolveFrom = createRequire(fileURLToPath(parent));
-  return resolveFrom.resolve(specifier);
+  if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    return new URL(specifier, benchmarkDirUrl).href;
+  }
+  if (isAbsolute(specifier)) {
+    return pathToFileURL(specifier).href;
+  }
+  return requireFrom.resolve(specifier);
 };
 
 const source = `
@@ -50,37 +54,70 @@ export const post = ${serialize(postCode)};
 
 const context = createContext({ console, Buffer });
 const imports = new Map<string, SyntheticModule>();
-const mod = new SourceTextModule(source, {
-  identifier: baseUrl,
-  context,
-  initializeImportMeta(meta) {
-    meta.url = baseUrl;
-  },
-  importModuleDynamically(specifier, referencingModule) {
-    const base = referencingModule.identifier ?? baseUrl;
-    const resolved = resolveSpecifier(specifier, base);
-    return import(resolved);
-  },
-});
 
-await mod.link(async (specifier, referencingModule) => {
-  const base = referencingModule.identifier ?? baseUrl;
-  const target = resolveSpecifier(specifier, base);
+const createSyntheticModule = (moduleExports: unknown, exportNames: string[], identifier: string) => {
+  const mod = new SyntheticModule(
+    exportNames,
+    () => {
+      for (const name of exportNames) {
+        if (name === 'default') {
+          mod.setExport(name, moduleExports);
+          continue;
+        }
+        mod.setExport(name, (moduleExports as Record<string, unknown>)[name]);
+      }
+    },
+    { identifier, context },
+  );
+  return mod;
+};
+
+const isCjsModule = (target: string) => target.endsWith('.cjs') || target.endsWith('.cts');
+
+const toRequireTarget = (target: string) => (target.startsWith('file:') ? fileURLToPath(target) : target);
+
+const loadModule = async (target: string) => {
   const cached = imports.get(target);
   if (cached) return cached;
 
+  if (isCjsModule(target)) {
+    const required = requireFrom(toRequireTarget(target));
+    const exportNames = required && (typeof required === 'object' || typeof required === 'function') ? Object.keys(required) : [];
+    if (!exportNames.includes('default')) {
+      exportNames.push('default');
+    }
+    const mod = createSyntheticModule(required, exportNames, target);
+    imports.set(target, mod);
+    return mod;
+  }
+
   const importedModule = await import(target);
   const exportNames = Object.keys(importedModule);
-  const imported = new SyntheticModule(
-    exportNames,
-    () => {
-      exportNames.forEach((key) => imported.setExport(key, importedModule[key]));
-    },
-    { identifier: target, context: referencingModule.context },
-  );
-  imports.set(target, imported);
-  return imported;
+  const mod = createSyntheticModule(importedModule, exportNames, target);
+  imports.set(target, mod);
+  return mod;
+};
+
+const loadDynamicModule = async (target: string) => {
+  const mod = await loadModule(target);
+  if (mod.status !== 'evaluated') {
+    await mod.evaluate();
+  }
+  return mod;
+};
+const mod = new SourceTextModule(source, {
+  identifier: resolvedBenchmarkUrl,
+  context,
+  initializeImportMeta(meta) {
+    meta.url = resolvedBenchmarkUrl;
+  },
+  importModuleDynamically(specifier) {
+    const resolved = resolveSpecifier(specifier);
+    return loadDynamicModule(resolved);
+  },
 });
+
+await mod.link(async (specifier) => loadModule(resolveSpecifier(specifier)));
 
 await mod.evaluate();
 const { setup, teardown, pre, run, post } = mod.namespace as any;
@@ -90,7 +127,6 @@ if (!run) {
 }
 
 process.exitCode = await benchmark({
-  baseUrl,
   setup,
   teardown,
   pre,

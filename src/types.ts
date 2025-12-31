@@ -34,11 +34,9 @@ export interface BenchmarkOptions {
   absThreshold?: number; // ns
   relThreshold?: number; // %
   gcObserver?: boolean;
-  baseUrl?: string;
 }
 
 export interface RunOptions<TContext, TInput> {
-  baseUrl?: string;
   setup?: SetupFn<TContext>;
   teardown?: TeardownFn<TContext>;
   pre?: StepFn<TContext, TInput>;
@@ -48,7 +46,7 @@ export interface RunOptions<TContext, TInput> {
 }
 
 export interface WorkerOptions extends Required<BenchmarkOptions> {
-  baseUrl: string;
+  benchmarkUrl?: string;
   setupCode?: string;
   teardownCode?: string;
   preCode?: string;

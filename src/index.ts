@@ -1,5 +1,4 @@
 import { cpus } from 'node:os';
-import { pathToFileURL } from 'node:url';
 import { createExecutor, ExecutorOptions, ExecutorReport } from './executor.js';
 import { MaybePromise, StepFn, SetupFn, TeardownFn, FeedFn, ReportType, ReportTypeList, DEFAULT_CYCLES } from './types.js';
 
@@ -10,6 +9,7 @@ declare global {
 export const DEFAULT_WORKERS = cpus().length;
 
 export const AsyncFunction = (async () => {}).constructor;
+const BENCHMARK_URL = Symbol.for('overtake.benchmarkUrl');
 
 export interface TargetReport<R extends ReportTypeList> {
   target: string;
@@ -135,29 +135,24 @@ export class Benchmark<TInput> {
     return new Target<TContext, TInput>(target);
   }
 
-  async execute<R extends readonly ReportType[] = typeof DEFAULT_REPORT_TYPES>({
-    workers = DEFAULT_WORKERS,
-    warmupCycles = 20,
-    maxCycles = DEFAULT_CYCLES,
-    minCycles = 50,
-    absThreshold = 1_000,
-    relThreshold = 0.02,
-    gcObserver = true,
-    reportTypes = DEFAULT_REPORT_TYPES as unknown as R,
-    baseUrl,
-  }: ExecutorOptions<R>): Promise<TargetReport<R>[]> {
+  async execute<R extends readonly ReportType[] = typeof DEFAULT_REPORT_TYPES>(options: ExecutorOptions<R>): Promise<TargetReport<R>[]> {
+    const {
+      workers = DEFAULT_WORKERS,
+      warmupCycles = 20,
+      maxCycles = DEFAULT_CYCLES,
+      minCycles = 50,
+      absThreshold = 1_000,
+      relThreshold = 0.02,
+      gcObserver = true,
+      reportTypes = DEFAULT_REPORT_TYPES as unknown as R,
+    } = options;
     if (this.#executed) {
       throw new Error("Benchmark is executed and can't be reused");
     }
     this.#executed = true;
-
-    const resolvedBaseUrl = baseUrl ?? pathToFileURL(process.cwd()).href;
-    if (!baseUrl) {
-      console.warn("Overtake: baseUrl not provided; defaulting to process.cwd(). Pass the benchmark's import.meta.url so relative imports resolve correctly.");
-    }
+    const benchmarkUrl = (options as unknown as Record<symbol, unknown>)[BENCHMARK_URL];
 
     const executor = createExecutor<unknown, TInput, R>({
-      baseUrl: resolvedBaseUrl,
       workers,
       warmupCycles,
       maxCycles,
@@ -166,7 +161,8 @@ export class Benchmark<TInput> {
       relThreshold,
       gcObserver,
       reportTypes,
-    });
+      [BENCHMARK_URL]: benchmarkUrl,
+    } as Required<ExecutorOptions<R>>);
 
     const reports: TargetReport<R>[] = [];
     for (const target of this.#targets) {
@@ -177,7 +173,6 @@ export class Benchmark<TInput> {
           const data = await feed.fn?.();
           executor
             .push<ExecutorReport<R>>({
-              baseUrl: resolvedBaseUrl,
               setup: target.setup,
               teardown: target.teardown,
               pre: measure.pre,
