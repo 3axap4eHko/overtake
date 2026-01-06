@@ -1,5 +1,5 @@
 import { performance, PerformanceObserver } from 'node:perf_hooks';
-import { Options, Control } from './types.js';
+import { Options, Control, DURATION_SCALE } from './types.js';
 import { GCWatcher } from './gc-watcher.js';
 import { StepFn } from './types.js';
 
@@ -120,7 +120,7 @@ const collectSample = async <TContext, TInput>({
         consume(runRaw(context, data));
       }
     }
-    return (hr() - batchStart) / BigInt(batchSize);
+    return ((hr() - batchStart) * DURATION_SCALE) / BigInt(batchSize);
   }
 
   let sampleDuration = 0n;
@@ -151,7 +151,7 @@ const collectSample = async <TContext, TInput>({
       }
     }
   }
-  return sampleDuration / BigInt(batchSize);
+  return (sampleDuration * DURATION_SCALE) / BigInt(batchSize);
 };
 
 const tuneParameters = async <TContext, TInput>({
@@ -448,7 +448,7 @@ export const benchmark = async <TContext, TInput>({
             consume(runRaw(context, input));
           }
         }
-        return (hr() - batchStart) / BigInt(batchSize);
+        return ((hr() - batchStart) * DURATION_SCALE) / BigInt(batchSize);
       }
 
       if (preSync) {
@@ -526,7 +526,7 @@ export const benchmark = async <TContext, TInput>({
           }
         }
         const batchDuration = hr() - batchStart;
-        sampleDuration = batchDuration / BigInt(batchSize);
+        sampleDuration = (batchDuration * DURATION_SCALE) / BigInt(batchSize);
       } else {
         for (let b = 0; b < batchSize; b++) {
           if (preSync) {
@@ -544,7 +544,7 @@ export const benchmark = async <TContext, TInput>({
             await postAsync(context, input);
           }
         }
-        sampleDuration /= BigInt(batchSize);
+        sampleDuration = (sampleDuration * DURATION_SCALE) / BigInt(batchSize);
       }
 
       const sampleEnd = performance.now();

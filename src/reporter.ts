@@ -1,5 +1,5 @@
 import { div, max, divs } from './utils.js';
-import { ReportType } from './types.js';
+import { ReportType, DURATION_SCALE } from './types.js';
 
 const units = [
   { unit: 'ns', factor: 1 },
@@ -56,15 +56,15 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
   }
   switch (type) {
     case 'min': {
-      return new Report(type, durations[0]);
+      return new Report(type, durations[0], 0, DURATION_SCALE);
     }
     case 'max': {
-      return new Report(type, durations[n - 1]);
+      return new Report(type, durations[n - 1], 0, DURATION_SCALE);
     }
     case 'median': {
       const mid = Math.floor(n / 2);
       const med = n % 2 === 0 ? (durations[mid - 1] + durations[mid]) / 2n : durations[mid];
-      return new Report(type, med);
+      return new Report(type, med, 0, DURATION_SCALE);
     }
 
     case 'mode': {
@@ -87,7 +87,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
       if (lastIdx < n - 1) upper = durations[lastIdx + 1];
       const gap = max(modeVal - lower, upper - modeVal);
       const uncertainty = modeVal > 0 ? Number(((gap / 2n) * 100n) / modeVal) : 0;
-      return new Report(type, modeVal, uncertainty);
+      return new Report(type, modeVal, uncertainty, DURATION_SCALE);
     }
 
     case 'ops': {
@@ -95,18 +95,18 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
       for (const duration of durations) {
         sum += duration;
       }
-      const avgNs = sum / BigInt(n);
-      const nsPerSec = 1_000_000_000n;
-      const raw = Number(nsPerSec) / Number(avgNs);
+      const avgScaled = sum / BigInt(n);
+      const nsPerSecScaled = 1_000_000_000n * DURATION_SCALE;
+      const raw = Number(nsPerSecScaled) / Number(avgScaled);
       const extra = raw < 1 ? Math.ceil(-Math.log10(raw)) : 0;
 
       const exp = raw > 100 ? 0 : 2 + extra;
 
       const scale = 10n ** BigInt(exp);
 
-      const value = avgNs > 0n ? (nsPerSec * scale) / avgNs : 0n;
+      const value = avgScaled > 0n ? (nsPerSecScaled * scale) / avgScaled : 0n;
       const deviation = durations[n - 1] - durations[0];
-      const uncertainty = avgNs > 0 ? Number(div(deviation * scale, 2n * avgNs)) : 0;
+      const uncertainty = avgScaled > 0 ? Number(div(deviation * scale, 2n * avgScaled)) : 0;
       return new Report(type, value, uncertainty, scale);
     }
     case 'mean': {
@@ -115,16 +115,16 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
         sum += duration;
       }
       const value = divs(sum, BigInt(n), 1n);
-      return new Report(type, value);
+      return new Report(type, value, 0, DURATION_SCALE);
     }
 
     default: {
       const p = Number(type.slice(1));
       if (p === 0) {
-        return new Report(type, durations[0]);
+        return new Report(type, durations[0], 0, DURATION_SCALE);
       }
       if (p === 100) {
-        return new Report(type, durations[n - 1]);
+        return new Report(type, durations[n - 1], 0, DURATION_SCALE);
       }
       const idx = Math.ceil((p / 100) * n) - 1;
       const value = durations[Math.min(Math.max(idx, 0), n - 1)];
@@ -133,7 +133,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
       const gap = max(value - prev, next - value);
       const uncertainty = value > 0 ? Number(div(divs(gap, 2n, 100_00n), value)) / 100 : 0;
 
-      return new Report(type, value, uncertainty);
+      return new Report(type, value, uncertainty, DURATION_SCALE);
     }
   }
 };
