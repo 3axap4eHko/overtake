@@ -1,22 +1,21 @@
 export interface GCMarker {
   ref: WeakRef<object>;
-  token: object;
 }
 
 export class GCWatcher {
   #registry = new FinalizationRegistry(() => {});
 
   start(): GCMarker {
-    const token = {};
-    const ref = new WeakRef(token);
-    this.#registry.register(token, null, token);
-    return { ref, token };
+    const target = {};
+    const ref = new WeakRef(target);
+    this.#registry.register(target, null, ref);
+    return { ref };
   }
 
   seen(marker: GCMarker): boolean {
     const collected = marker.ref.deref() === undefined;
     if (!collected) {
-      this.#registry.unregister(marker.token);
+      this.#registry.unregister(marker.ref);
     }
     return collected;
   }

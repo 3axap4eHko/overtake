@@ -6,10 +6,11 @@ const baseline = benchmark('accuracy tuning feed', () => {
   for (let i = 0; i < uints.length; i++) {
     uints[i] = (i * 31) ^ 0x9e3779b1;
   }
+  const tiny = Buffer.alloc(4_096, 3);
   const src = Buffer.alloc(bytes, 7);
   const dst = Buffer.allocUnsafe(bytes);
 
-  return { uints, src, dst };
+  return { uints, tiny, src, dst };
 });
 
 baseline
@@ -17,10 +18,10 @@ baseline
     return { scratch: 0 };
   })
   .measure('sum uint32 array', (ctx, { uints }) => {
-    let acc = ctx.scratch;
+    let acc = ctx.scratch | 0;
     for (let round = 0; round < 8; round++) {
       for (let i = 0; i < uints.length; i++) {
-        acc += uints[i];
+        acc = (acc + uints[i]) | 0;
       }
     }
     ctx.scratch = acc;
@@ -45,10 +46,34 @@ baseline
     dst.fill(0);
   });
 
-baseline.target('steady loop baseline').measure('counter increment', () => {
+baseline.target('steady loop baseline').measure('counter increment', (_, { uints }) => {
   let x = 0;
   for (let i = 0; i < 200_000; i++) {
-    x += (i & 1023) >>> 0;
+    x = (x + uints[i & (uints.length - 1)]) | 0;
+  }
+  return x;
+});
+
+const gcImpact = baseline.target('gc impact', () => {
+  const pool: Buffer[] = Array.from({ length: 512 }, () => Buffer.alloc(4_096));
+  return { pool };
+});
+
+gcImpact.measure('alloc churn', (_, { tiny }) => {
+  let x = 0;
+  for (let i = 0; i < 512; i++) {
+    const buf = Buffer.from(tiny);
+    x ^= buf[0];
+  }
+  return x;
+});
+
+gcImpact.measure('pool reuse', (ctx, { tiny }) => {
+  let x = 0;
+  const { pool } = ctx;
+  for (let i = 0; i < pool.length; i++) {
+    pool[i].set(tiny);
+    x ^= pool[i][0];
   }
   return x;
 });

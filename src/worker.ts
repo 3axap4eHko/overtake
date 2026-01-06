@@ -25,7 +25,7 @@ const {
   controlSAB,
 }: WorkerOptions = workerData;
 
-const serialize = (code?: string) => (code ? code : '() => {}');
+const serialize = (code?: string) => (code ? code : 'undefined');
 
 const resolvedBenchmarkUrl = typeof benchmarkUrl === 'string' ? benchmarkUrl : pathToFileURL(process.cwd()).href;
 const benchmarkDirUrl = new URL('.', resolvedBenchmarkUrl).href;

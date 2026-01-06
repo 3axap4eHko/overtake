@@ -9,7 +9,7 @@ export interface TeardownFn<TContext> {
 }
 
 export interface StepFn<TContext, TInput> {
-  (ctx: TContext, input: TInput): MaybePromise<void>;
+  (ctx: TContext, input: TInput): MaybePromise<unknown>;
 }
 
 export interface FeedFn<TInput> {

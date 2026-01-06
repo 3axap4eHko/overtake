@@ -1,24 +1,55 @@
 import { performance, PerformanceObserver } from 'node:perf_hooks';
 import { Options, Control } from './types.js';
 import { GCWatcher } from './gc-watcher.js';
-import { StepFn, MaybePromise } from './types.js';
+import { StepFn } from './types.js';
 
 const COMPLETE_VALUE = 100_00;
 
 const hr = process.hrtime.bigint.bind(process.hrtime);
 
-const runSync = (run: Function) => {
+const sink = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+const consume = (value: unknown) => {
+  let payload = 0;
+  switch (typeof value) {
+    case 'number':
+      payload = Number.isFinite(value) ? Math.trunc(value) : 0;
+      break;
+    case 'bigint':
+      payload = Number(value & 0xffff_ffffn);
+      break;
+    case 'string':
+      payload = value.length;
+      break;
+    case 'boolean':
+      payload = value ? 1 : 0;
+      break;
+    case 'object':
+      payload = value === null ? 0 : 1;
+      break;
+    case 'function':
+      payload = 1;
+      break;
+    default:
+      payload = -1;
+  }
+  Atomics.xor(sink, 0, payload);
+};
+
+const runSync = (run: Function, overhead: bigint) => {
   return (...args: unknown[]) => {
     const start = hr();
-    run(...args);
-    return hr() - start;
+    const result = run(...args);
+    consume(result);
+    const duration = hr() - start;
+    return duration > overhead ? duration - overhead : 0n;
   };
 };
 
 const runAsync = (run: Function) => {
   return async (...args: unknown[]) => {
     const start = hr();
-    await run(...args);
+    const result = await run(...args);
+    consume(result);
     return hr() - start;
   };
 };
@@ -34,22 +65,91 @@ const GC_STRIDE = 32;
 const OUTLIER_MULTIPLIER = 4;
 const OUTLIER_IQR_MULTIPLIER = 3;
 const OUTLIER_WINDOW = 64;
+const OUTLIER_ABS_THRESHOLD_NS = 10_000;
+const BASELINE_SAMPLES = 16;
+const OUTLIER_SCRATCH = new Float64Array(OUTLIER_WINDOW);
 
 type GCEvent = { start: number; end: number };
+type RunTimedSync<TContext, TInput> = (ctx: TContext, data: TInput, nonce?: number) => bigint;
+type RunTimedAsync<TContext, TInput> = (ctx: TContext, data: TInput, nonce?: number) => Promise<bigint>;
 
-const collectSample = async <TContext, TInput>(
-  batchSize: number,
-  run: (ctx: TContext, data: TInput) => MaybePromise<bigint>,
-  pre: StepFn<TContext, TInput> | undefined,
-  post: StepFn<TContext, TInput> | undefined,
-  context: TContext,
-  data: TInput,
-) => {
+const measureTimerOverhead = () => {
+  let total = 0n;
+  for (let i = 0; i < BASELINE_SAMPLES; i++) {
+    const start = hr();
+    consume(0);
+    total += hr() - start;
+  }
+  return total / BigInt(BASELINE_SAMPLES);
+};
+
+const collectSample = async <TContext, TInput>({
+  batchSize,
+  run,
+  runRaw,
+  runIsAsync,
+  pre,
+  preIsAsync,
+  post,
+  postIsAsync,
+  context,
+  data,
+  nextNonce,
+}: {
+  batchSize: number;
+  run: RunTimedSync<TContext, TInput> | RunTimedAsync<TContext, TInput>;
+  runRaw: StepFn<TContext, TInput>;
+  runIsAsync: boolean;
+  pre: StepFn<TContext, TInput> | undefined;
+  preIsAsync: boolean;
+  post: StepFn<TContext, TInput> | undefined;
+  postIsAsync: boolean;
+  context: TContext;
+  data: TInput;
+  nextNonce: (() => number) | null;
+}) => {
+  const canBatchTime = !runIsAsync && !pre && !post;
+  if (canBatchTime) {
+    const batchStart = hr();
+    if (nextNonce) {
+      for (let b = 0; b < batchSize; b++) {
+        consume((runRaw as Function)(context, data, nextNonce()));
+      }
+    } else {
+      for (let b = 0; b < batchSize; b++) {
+        consume(runRaw(context, data));
+      }
+    }
+    return (hr() - batchStart) / BigInt(batchSize);
+  }
+
   let sampleDuration = 0n;
   for (let b = 0; b < batchSize; b++) {
-    await pre?.(context, data);
-    sampleDuration += await run(context, data);
-    await post?.(context, data);
+    if (pre) {
+      if (preIsAsync) {
+        await pre(context, data);
+      } else {
+        pre(context, data);
+      }
+    }
+
+    if (runIsAsync) {
+      const runAsyncFn = run as RunTimedAsync<TContext, TInput>;
+      const duration = nextNonce ? await runAsyncFn(context, data, nextNonce()) : await runAsyncFn(context, data);
+      sampleDuration += duration;
+    } else {
+      const runSyncFn = run as RunTimedSync<TContext, TInput>;
+      const duration = nextNonce ? runSyncFn(context, data, nextNonce()) : runSyncFn(context, data);
+      sampleDuration += duration;
+    }
+
+    if (post) {
+      if (postIsAsync) {
+        await post(context, data);
+      } else {
+        post(context, data);
+      }
+    }
   }
   return sampleDuration / BigInt(batchSize);
 };
@@ -57,23 +157,33 @@ const collectSample = async <TContext, TInput>(
 const tuneParameters = async <TContext, TInput>({
   initialBatch,
   run,
+  runRaw,
+  runIsAsync,
   pre,
+  preIsAsync,
   post,
+  postIsAsync,
   context,
   data,
   minCycles,
   relThreshold,
   maxCycles,
+  nextNonce,
 }: {
   initialBatch: number;
-  run: (ctx: TContext, data: TInput) => MaybePromise<bigint>;
+  run: RunTimedSync<TContext, TInput> | RunTimedAsync<TContext, TInput>;
+  runRaw: StepFn<TContext, TInput>;
+  runIsAsync: boolean;
   pre?: StepFn<TContext, TInput>;
+  preIsAsync: boolean;
   post?: StepFn<TContext, TInput>;
+  postIsAsync: boolean;
   context: TContext;
   data: TInput;
   minCycles: number;
   relThreshold: number;
   maxCycles: number;
+  nextNonce: (() => number) | null;
 }) => {
   let batchSize = initialBatch;
   let bestCv = Number.POSITIVE_INFINITY;
@@ -83,7 +193,19 @@ const tuneParameters = async <TContext, TInput>({
     const samples: number[] = [];
     const sampleCount = Math.min(8, maxCycles);
     for (let s = 0; s < sampleCount; s++) {
-      const duration = await collectSample(batchSize, run, pre, post, context, data);
+      const duration = await collectSample({
+        batchSize,
+        run,
+        runRaw,
+        runIsAsync,
+        pre,
+        preIsAsync,
+        post,
+        postIsAsync,
+        context,
+        data,
+        nextNonce,
+      });
       samples.push(Number(duration));
     }
     const mean = samples.reduce((acc, v) => acc + v, 0) / samples.length;
@@ -158,13 +280,17 @@ const pushWindow = (arr: number[], value: number, cap: number) => {
 
 const medianAndIqr = (arr: number[]) => {
   if (arr.length === 0) return { median: 0, iqr: 0 };
-  const sorted = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  const q1Idx = Math.floor(sorted.length * 0.25);
-  const q3Idx = Math.floor(sorted.length * 0.75);
-  const q1 = sorted[q1Idx];
-  const q3 = sorted[q3Idx];
+  for (let i = 0; i < arr.length; i++) {
+    OUTLIER_SCRATCH[i] = arr[i];
+  }
+  const view = OUTLIER_SCRATCH.subarray(0, arr.length);
+  view.sort();
+  const mid = Math.floor(view.length / 2);
+  const median = view.length % 2 === 0 ? (view[mid - 1] + view[mid]) / 2 : view[mid];
+  const q1Idx = Math.floor(view.length * 0.25);
+  const q3Idx = Math.floor(view.length * 0.75);
+  const q1 = view[q1Idx];
+  const q3 = view[q3Idx];
   return { median, iqr: q3 - q1 };
 };
 
@@ -201,66 +327,156 @@ export const benchmark = async <TContext, TInput>({
   control[Control.COMPLETE] = 255;
 
   const context = (await setup?.()) as TContext;
+  const input = data as TInput;
   const maxCycles = durations.length;
   const gcWatcher = gcObserver ? new GCWatcher() : null;
   const gcTracker = gcObserver ? createGCTracker() : null;
 
   try {
     // classify sync/async and capture initial duration
-    await pre?.(context, data!);
-    const probeStart = hr();
-    const probeResult = runRaw(context, data!);
-    const isAsync = isThenable(probeResult);
-    if (isAsync) {
-      await probeResult;
+    let preIsAsync = false;
+    if (pre) {
+      const preResult = pre(context, input);
+      preIsAsync = isThenable(preResult);
+      if (preIsAsync) {
+        await preResult;
+      }
     }
-    const durationProbe = hr() - probeStart;
-    await post?.(context, data!);
 
-    const run = isAsync ? runAsync(runRaw) : runSync(runRaw);
+    const probeStart = hr();
+    const probeResult = runRaw(context, input);
+    const runIsAsync = isThenable(probeResult);
+    if (runIsAsync) {
+      const resolved = await probeResult;
+      consume(resolved);
+    } else {
+      consume(probeResult);
+    }
+    const durationProbeRaw = hr() - probeStart;
+
+    let postIsAsync = false;
+    if (post) {
+      const postResult = post(context, input);
+      postIsAsync = isThenable(postResult);
+      if (postIsAsync) {
+        await postResult;
+      }
+    }
+
+    const timerOverhead = runIsAsync ? 0n : measureTimerOverhead();
+    let durationProbe = runIsAsync ? durationProbeRaw : durationProbeRaw > timerOverhead ? durationProbeRaw - timerOverhead : 0n;
+
+    const shouldPerturbInput = process.env.OVERTAKE_PERTURB_INPUT === '1';
+    let nonce = 0;
+    const nextNonce = shouldPerturbInput
+      ? () => {
+          nonce = (nonce + 1) | 0;
+          return nonce;
+        }
+      : null;
+
+    if (!runIsAsync && !pre && !post) {
+      const batchProbeSize = 10_000;
+      const batchProbeStart = hr();
+      if (nextNonce) {
+        for (let i = 0; i < batchProbeSize; i++) {
+          consume((runRaw as Function)(context, input, nextNonce()));
+        }
+      } else {
+        for (let i = 0; i < batchProbeSize; i++) {
+          consume(runRaw(context, input));
+        }
+      }
+      durationProbe = (hr() - batchProbeStart) / BigInt(batchProbeSize);
+    }
+
+    const runTimedSync = runIsAsync ? null : runSync(runRaw, timerOverhead);
+    const runTimedAsync = runIsAsync ? runAsync(runRaw) : null;
+    const run = runIsAsync ? runTimedAsync! : runTimedSync!;
+
+    const runOnceSync: RunTimedSync<TContext, TInput> | null = runIsAsync ? null : nextNonce ? (ctx, dataValue) => runTimedSync!(ctx, dataValue, nextNonce()) : runTimedSync!;
+    const runOnceAsync: RunTimedAsync<TContext, TInput> | null = runIsAsync ? (nextNonce ? (ctx, dataValue) => runTimedAsync!(ctx, dataValue, nextNonce()) : runTimedAsync!) : null;
+
+    const preSync = preIsAsync ? null : pre;
+    const preAsync = preIsAsync ? pre : null;
+    const postSync = postIsAsync ? null : post;
+    const postAsync = postIsAsync ? post : null;
 
     // choose batch size to amortize timer overhead
     const durationPerRun = durationProbe === 0n ? 1n : durationProbe;
     const suggestedBatch = Number(TARGET_SAMPLE_NS / durationPerRun);
-    const initialBatchSize = Math.min(MAX_BATCH, Math.max(1, suggestedBatch));
+    const minBatchForFastOps = durationProbe < 100n ? 100_000 : 1;
+    const initialBatchSize = Math.min(MAX_BATCH, Math.max(minBatchForFastOps, suggestedBatch));
 
     // auto-tune based on warmup samples
     const tuned = await tuneParameters({
       initialBatch: initialBatchSize,
       run,
+      runRaw,
+      runIsAsync,
       pre,
+      preIsAsync,
       post,
+      postIsAsync,
       context,
-      data: data as TInput,
+      data: input,
       minCycles,
       relThreshold,
       maxCycles,
+      nextNonce,
     });
     let batchSize = tuned.batchSize;
     minCycles = tuned.minCycles;
     relThreshold = tuned.relThreshold;
 
     // warmup: run until requested cycles, adapt if unstable
-    const warmupStart = Date.now();
+    const warmupStart = performance.now();
     let warmupRemaining = warmupCycles;
     const warmupWindow: number[] = [];
     const warmupCap = Math.max(warmupCycles, Math.min(maxCycles, warmupCycles * 4 || 1000));
+    const canBatchTime = !runIsAsync && !preSync && !preAsync && !postSync && !postAsync;
 
-    while (Date.now() - warmupStart < 1_000 && warmupRemaining > 0) {
-      const start = hr();
-      await pre?.(context, data!);
-      await run(context, data);
-      await post?.(context, data!);
-      pushWindow(warmupWindow, Number(hr() - start), warmupCap);
+    const runWarmup = async () => {
+      if (canBatchTime) {
+        const batchStart = hr();
+        if (nextNonce) {
+          for (let b = 0; b < batchSize; b++) {
+            consume((runRaw as Function)(context, input, nextNonce()));
+          }
+        } else {
+          for (let b = 0; b < batchSize; b++) {
+            consume(runRaw(context, input));
+          }
+        }
+        return (hr() - batchStart) / BigInt(batchSize);
+      }
+
+      if (preSync) {
+        preSync(context, input);
+      } else if (preAsync) {
+        await preAsync(context, input);
+      }
+
+      const duration = runIsAsync ? await runOnceAsync!(context, input) : runOnceSync!(context, input);
+
+      if (postSync) {
+        postSync(context, input);
+      } else if (postAsync) {
+        await postAsync(context, input);
+      }
+
+      return duration;
+    };
+
+    while (performance.now() - warmupStart < 1_000 && warmupRemaining > 0) {
+      const duration = await runWarmup();
+      pushWindow(warmupWindow, Number(duration), warmupCap);
       warmupRemaining--;
     }
     let warmupDone = 0;
     while (warmupDone < warmupRemaining) {
-      const start = hr();
-      await pre?.(context, data!);
-      await run(context, data);
-      await post?.(context, data!);
-      pushWindow(warmupWindow, Number(hr() - start), warmupCap);
+      const duration = await runWarmup();
+      pushWindow(warmupWindow, Number(duration), warmupCap);
       warmupDone++;
       if (global.gc && warmupDone % GC_STRIDE === 0) {
         global.gc();
@@ -271,53 +487,90 @@ export const benchmark = async <TContext, TInput>({
       if (cv <= relThreshold * 2) {
         break;
       }
-      const start = hr();
-      await pre?.(context, data!);
-      await run(context, data);
-      await post?.(context, data!);
-      pushWindow(warmupWindow, Number(hr() - start), warmupCap);
+      const duration = await runWarmup();
+      pushWindow(warmupWindow, Number(duration), warmupCap);
     }
 
     let i = 0;
     let mean = 0n;
     let m2 = 0n;
     const outlierWindow: number[] = [];
+    let skipped = 0;
+    const maxSkipped = maxCycles * 10;
+    let disableFiltering = false;
 
     while (true) {
       if (i >= maxCycles) break;
+      if (!disableFiltering && skipped >= maxSkipped) {
+        console.error(`Warning: ${skipped} samples skipped due to noise/outlier detection. ` + `Disabling filtering for remaining samples. Results may have higher variance.`);
+        disableFiltering = true;
+      }
+
+      if (global.gc && i > 0 && i % GC_STRIDE === 0) {
+        global.gc();
+      }
 
       const gcMarker = gcWatcher?.start();
       const sampleStart = performance.now();
       let sampleDuration = 0n;
-      for (let b = 0; b < batchSize; b++) {
-        await pre?.(context, data!);
-        sampleDuration += await run(context, data);
-        await post?.(context, data!);
-        if (global.gc && (i + b) % GC_STRIDE === 0) {
-          global.gc();
+
+      if (canBatchTime) {
+        const batchStart = hr();
+        if (nextNonce) {
+          for (let b = 0; b < batchSize; b++) {
+            consume((runRaw as Function)(context, input, nextNonce()));
+          }
+        } else {
+          for (let b = 0; b < batchSize; b++) {
+            consume(runRaw(context, input));
+          }
         }
+        const batchDuration = hr() - batchStart;
+        sampleDuration = batchDuration / BigInt(batchSize);
+      } else {
+        for (let b = 0; b < batchSize; b++) {
+          if (preSync) {
+            preSync(context, input);
+          } else if (preAsync) {
+            await preAsync(context, input);
+          }
+
+          const duration = runIsAsync ? await runOnceAsync!(context, input) : runOnceSync!(context, input);
+          sampleDuration += duration;
+
+          if (postSync) {
+            postSync(context, input);
+          } else if (postAsync) {
+            await postAsync(context, input);
+          }
+        }
+        sampleDuration /= BigInt(batchSize);
       }
 
-      // normalize by batch size
-      sampleDuration /= BigInt(batchSize);
-
       const sampleEnd = performance.now();
-      const gcNoise = (gcMarker ? gcWatcher!.seen(gcMarker) : false) || (gcTracker?.overlaps(sampleStart, sampleEnd) ?? false);
-      if (gcNoise) {
-        continue;
+      if (!disableFiltering) {
+        const gcNoise = (gcMarker ? gcWatcher!.seen(gcMarker) : false) || (gcTracker?.overlaps(sampleStart, sampleEnd) ?? false);
+        if (gcNoise) {
+          skipped++;
+          continue;
+        }
       }
 
       const durationNumber = Number(sampleDuration);
       pushWindow(outlierWindow, durationNumber, OUTLIER_WINDOW);
-      const { median, iqr } = medianAndIqr(outlierWindow);
-      const maxAllowed = median + OUTLIER_IQR_MULTIPLIER * iqr || Number.POSITIVE_INFINITY;
-      if (outlierWindow.length >= 8 && durationNumber > maxAllowed) {
-        continue;
-      }
+      if (!disableFiltering) {
+        const { median, iqr } = medianAndIqr(outlierWindow);
+        const maxAllowed = median + OUTLIER_IQR_MULTIPLIER * iqr || Number.POSITIVE_INFINITY;
+        if (outlierWindow.length >= 8 && durationNumber > maxAllowed && durationNumber - median > OUTLIER_ABS_THRESHOLD_NS) {
+          skipped++;
+          continue;
+        }
 
-      const meanNumber = Number(mean);
-      if (i >= 8 && meanNumber > 0 && durationNumber > OUTLIER_MULTIPLIER * meanNumber) {
-        continue;
+        const meanNumber = Number(mean);
+        if (i >= 8 && meanNumber > 0 && durationNumber > OUTLIER_MULTIPLIER * meanNumber && durationNumber - meanNumber > OUTLIER_ABS_THRESHOLD_NS) {
+          skipped++;
+          continue;
+        }
       }
 
       durations[i++] = sampleDuration;
