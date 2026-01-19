@@ -65,7 +65,7 @@ const GC_STRIDE = 32;
 const OUTLIER_MULTIPLIER = 4;
 const OUTLIER_IQR_MULTIPLIER = 3;
 const OUTLIER_WINDOW = 64;
-const OUTLIER_ABS_THRESHOLD_NS = 10_000;
+const OUTLIER_ABS_THRESHOLD = 10_000_000;
 const BASELINE_SAMPLES = 16;
 const OUTLIER_SCRATCH = new Float64Array(OUTLIER_WINDOW);
 
@@ -465,7 +465,7 @@ export const benchmark = async <TContext, TInput>({
         await postAsync(context, input);
       }
 
-      return duration;
+      return duration * DURATION_SCALE;
     };
 
     while (performance.now() - warmupStart < 1_000 && warmupRemaining > 0) {
@@ -561,13 +561,13 @@ export const benchmark = async <TContext, TInput>({
       if (!disableFiltering) {
         const { median, iqr } = medianAndIqr(outlierWindow);
         const maxAllowed = median + OUTLIER_IQR_MULTIPLIER * iqr || Number.POSITIVE_INFINITY;
-        if (outlierWindow.length >= 8 && durationNumber > maxAllowed && durationNumber - median > OUTLIER_ABS_THRESHOLD_NS) {
+        if (outlierWindow.length >= 8 && durationNumber > maxAllowed && durationNumber - median > OUTLIER_ABS_THRESHOLD) {
           skipped++;
           continue;
         }
 
         const meanNumber = Number(mean);
-        if (i >= 8 && meanNumber > 0 && durationNumber > OUTLIER_MULTIPLIER * meanNumber && durationNumber - meanNumber > OUTLIER_ABS_THRESHOLD_NS) {
+        if (i >= 8 && meanNumber > 0 && durationNumber > OUTLIER_MULTIPLIER * meanNumber && durationNumber - meanNumber > OUTLIER_ABS_THRESHOLD) {
           skipped++;
           continue;
         }
@@ -578,7 +578,7 @@ export const benchmark = async <TContext, TInput>({
       mean += delta / BigInt(i);
       m2 += delta * (sampleDuration - mean);
 
-      const progress = Math.max(i / maxCycles) * COMPLETE_VALUE;
+      const progress = (i / maxCycles) * COMPLETE_VALUE;
       if (i % PROGRESS_STRIDE === 0) {
         control[Control.PROGRESS] = progress;
       }

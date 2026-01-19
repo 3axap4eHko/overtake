@@ -19,6 +19,9 @@ importers:
       glob:
         specifier: ^13.0.0
         version: 13.0.0
+      progress:
+        specifier: ^2.0.3
+        version: 2.0.3
     devDependencies:
       '@jest/globals':
         specifier: ^30.2.0
@@ -35,6 +38,9 @@ importers:
       '@types/node':
         specifier: ^25.0.3
         version: 25.0.3
+      '@types/progress':
+        specifier: ^2.0.7
+        version: 2.0.7
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -499,6 +505,9 @@ packages:
 
   '@types/node@25.0.3':
     resolution: { integrity: sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA== }
+
+  '@types/progress@2.0.7':
+    resolution: { integrity: sha512-iadjw02vte8qWx7U0YM++EybBha2CQLPGu9iJ97whVgJUT5Zq9MjAPYUnbfRI2Kpehimf1QjFJYxD0t8nqzu5w== }
 
   '@types/stack-utils@2.0.3':
     resolution: { integrity: sha512-9aEbYZ3TbYMznPdcdr3SmIrLXwC/AKZXQeCf9Pgao5CKb8CyHuEX5jzWPTkvregvhRJHcpRO6BFoGW9ycaOkYw== }
@@ -1315,6 +1324,10 @@ packages:
     peerDependencies:
       prettier: ^3.0.0
 
+  progress@2.0.3:
+    resolution: { integrity: sha512-7PiHtLll5LdnKIMw100I+8xJXR5gW2QwWYkT6iJva0bXitZKa/XMrSbdmg3r2Xnaidz9Qumd0VPaMrZlF9V9sA== }
+    engines: { node: '>=0.4.0' }
+
   pure-rand@7.0.1:
     resolution: { integrity: sha512-oTUZM/NAZS8p7ANR3SHh30kXB+zK2r2BPcEn/awJIbOvq82WoMN4p62AWWp3Hhw50G0xMsw1mhIBLqHw64EcNQ== }
 
@@ -2089,6 +2102,10 @@ snapshots:
   '@types/node@25.0.3':
     dependencies:
       undici-types: 7.16.0
+
+  '@types/progress@2.0.7':
+    dependencies:
+      '@types/node': 25.0.3
 
   '@types/stack-utils@2.0.3': {}
 
@@ -3010,6 +3027,8 @@ snapshots:
       prettier: 3.7.4
       tinyexec: 0.3.2
       tslib: 2.8.1
+
+  progress@2.0.3: {}
 
   pure-rand@7.0.1: {}
 

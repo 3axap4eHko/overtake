@@ -45,6 +45,10 @@ export interface RunOptions<TContext, TInput> {
   data?: TInput;
 }
 
+export interface ExecutorRunOptions<TContext, TInput> extends RunOptions<TContext, TInput> {
+  id?: string;
+}
+
 export interface WorkerOptions extends Required<BenchmarkOptions> {
   benchmarkUrl?: string;
   setupCode?: string;
@@ -73,3 +77,11 @@ export const CONTROL_SLOTS = Object.values(Control).length / 2;
 export const DEFAULT_CYCLES = 1_000;
 export const Z95 = 1.96;
 export const DURATION_SCALE = 1000n;
+export const COMPLETE_VALUE = 100_00;
+
+export interface ProgressInfo {
+  id: string;
+  progress: number;
+}
+
+export type ProgressCallback = (info: ProgressInfo) => void;

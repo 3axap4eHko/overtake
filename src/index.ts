@@ -1,6 +1,7 @@
 import { cpus } from 'node:os';
+import Progress from 'progress';
 import { createExecutor, ExecutorOptions, ExecutorReport } from './executor.js';
-import { MaybePromise, StepFn, SetupFn, TeardownFn, FeedFn, ReportType, ReportTypeList, DEFAULT_CYCLES } from './types.js';
+import { MaybePromise, StepFn, SetupFn, TeardownFn, FeedFn, ReportType, ReportTypeList, DEFAULT_CYCLES, ProgressInfo } from './types.js';
 
 declare global {
   const benchmark: typeof Benchmark.create;
@@ -135,7 +136,7 @@ export class Benchmark<TInput> {
     return new Target<TContext, TInput>(target);
   }
 
-  async execute<R extends readonly ReportType[] = typeof DEFAULT_REPORT_TYPES>(options: ExecutorOptions<R>): Promise<TargetReport<R>[]> {
+  async execute<R extends readonly ReportType[] = typeof DEFAULT_REPORT_TYPES>(options: ExecutorOptions<R> & { progress?: boolean }): Promise<TargetReport<R>[]> {
     const {
       workers = DEFAULT_WORKERS,
       warmupCycles = 20,
@@ -145,12 +146,37 @@ export class Benchmark<TInput> {
       relThreshold = 0.02,
       gcObserver = true,
       reportTypes = DEFAULT_REPORT_TYPES as unknown as R,
+      progress = false,
+      progressInterval = 100,
     } = options;
     if (this.#executed) {
       throw new Error("Benchmark is executed and can't be reused");
     }
     this.#executed = true;
     const benchmarkUrl = (options as unknown as Record<symbol, unknown>)[BENCHMARK_URL];
+
+    const totalBenchmarks = this.#targets.reduce((acc, t) => acc + t.measures.length * this.#feeds.length, 0);
+    const progressMap = new Map<string, number>();
+    let completedBenchmarks = 0;
+    let bar: Progress | null = null;
+
+    if (progress && totalBenchmarks > 0) {
+      bar = new Progress('  [:bar] :percent :current/:total :label', {
+        total: totalBenchmarks * 100,
+        width: 30,
+        complete: '=',
+        incomplete: ' ',
+      });
+    }
+
+    const onProgress = progress
+      ? (info: ProgressInfo) => {
+          progressMap.set(info.id, info.progress);
+          const totalProgress = (completedBenchmarks + [...progressMap.values()].reduce((a, b) => a + b, 0)) * 100;
+          const label = info.id.length > 30 ? info.id.slice(0, 27) + '...' : info.id;
+          bar?.update(totalProgress / (totalBenchmarks * 100), { label });
+        }
+      : undefined;
 
     const executor = createExecutor<unknown, TInput, R>({
       workers,
@@ -161,6 +187,8 @@ export class Benchmark<TInput> {
       relThreshold,
       gcObserver,
       reportTypes,
+      onProgress,
+      progressInterval,
       [BENCHMARK_URL]: benchmarkUrl,
     } as Required<ExecutorOptions<R>>);
 
@@ -170,9 +198,11 @@ export class Benchmark<TInput> {
       for (const measure of target.measures) {
         const measureReport: MeasureReport<R> = { measure: measure.title, feeds: [] };
         for (const feed of this.#feeds) {
+          const id = `${target.title}/${measure.title}/${feed.title}`;
           const data = await feed.fn?.();
           executor
             .push<ExecutorReport<R>>({
+              id,
               setup: target.setup,
               teardown: target.teardown,
               pre: measure.pre,
@@ -181,6 +211,8 @@ export class Benchmark<TInput> {
               data,
             })
             .then((data) => {
+              progressMap.delete(id);
+              completedBenchmarks++;
               measureReport.feeds.push({
                 feed: feed.title,
                 data,
@@ -193,6 +225,11 @@ export class Benchmark<TInput> {
     }
     await executor.drain();
     executor.kill();
+
+    if (bar) {
+      bar.update(1, { label: 'done' });
+      bar.terminate();
+    }
 
     return reports;
   }

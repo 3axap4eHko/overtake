@@ -4,23 +4,36 @@ import { queue } from 'async';
 import { pathToFileURL } from 'node:url';
 import { createReport, Report } from './reporter.js';
 import { cmp } from './utils.js';
-import { RunOptions, ReportOptions, WorkerOptions, BenchmarkOptions, Control, ReportType, ReportTypeList, CONTROL_SLOTS } from './types.js';
+import {
+  ExecutorRunOptions,
+  ReportOptions,
+  WorkerOptions,
+  BenchmarkOptions,
+  Control,
+  ReportType,
+  ReportTypeList,
+  CONTROL_SLOTS,
+  COMPLETE_VALUE,
+  ProgressCallback,
+} from './types.js';
 
 export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report> & { count: number };
 
 export interface ExecutorOptions<R extends ReportTypeList> extends BenchmarkOptions, ReportOptions<R> {
   workers?: number;
   maxCycles?: number;
+  onProgress?: ProgressCallback;
+  progressInterval?: number;
 }
 
 const BENCHMARK_URL = Symbol.for('overtake.benchmarkUrl');
 
 export const createExecutor = <TContext, TInput, R extends ReportTypeList>(options: Required<ExecutorOptions<R>>) => {
-  const { workers, warmupCycles, maxCycles, minCycles, absThreshold, relThreshold, gcObserver = true, reportTypes } = options;
+  const { workers, warmupCycles, maxCycles, minCycles, absThreshold, relThreshold, gcObserver = true, reportTypes, onProgress, progressInterval = 100 } = options;
   const benchmarkUrl = (options as Record<symbol, unknown>)[BENCHMARK_URL];
   const resolvedBenchmarkUrl = typeof benchmarkUrl === 'string' ? benchmarkUrl : pathToFileURL(process.cwd()).href;
 
-  const executor = queue<RunOptions<TContext, TInput>>(async ({ setup, teardown, pre, run, post, data }) => {
+  const executor = queue<ExecutorRunOptions<TContext, TInput>>(async ({ id, setup, teardown, pre, run, post, data }) => {
     const setupCode = setup?.toString();
     const teardownCode = teardown?.toString();
     const preCode = pre?.toString();
@@ -53,12 +66,32 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     const worker = new Worker(workerFile, {
       workerData,
     });
-    const [exitCode] = await once(worker, 'exit');
-    if (exitCode !== 0) {
-      throw new Error(`worker exited with code ${exitCode}`);
-    }
 
     const control = new Int32Array(controlSAB);
+    let progressIntervalId: ReturnType<typeof setInterval> | undefined;
+    if (onProgress && id) {
+      progressIntervalId = setInterval(() => {
+        const progress = control[Control.PROGRESS] / COMPLETE_VALUE;
+        onProgress({ id, progress });
+      }, progressInterval);
+    }
+
+    const WORKER_TIMEOUT_MS = 300_000;
+    const exitPromise = once(worker, 'exit');
+    const timeoutId = setTimeout(() => worker.terminate(), WORKER_TIMEOUT_MS);
+    try {
+      const [exitCode] = await exitPromise;
+      clearTimeout(timeoutId);
+      if (progressIntervalId) clearInterval(progressIntervalId);
+      if (exitCode !== 0) {
+        throw new Error(`worker exited with code ${exitCode}`);
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (progressIntervalId) clearInterval(progressIntervalId);
+      throw err;
+    }
+
     const count = control[Control.INDEX];
     const durations = new BigUint64Array(durationsSAB).slice(0, count).sort(cmp);
 

@@ -28,6 +28,7 @@ commander
   .addOption(new Option('--max-cycles [maxCycles]', 'maximum measurement cycles per feed').argParser(parseInt))
   .addOption(new Option('--min-cycles [minCycles]', 'minimum measurement cycles per feed').argParser(parseInt))
   .addOption(new Option('--no-gc-observer', 'disable GC overlap detection'))
+  .addOption(new Option('--progress', 'show progress bar during benchmark execution'))
   .action(async (patterns: string[], executeOptions) => {
     const files = new Set<string>();
     await Promise.all(
