@@ -112,10 +112,12 @@ benchmark('local', () => 1)
 
 // Programmatic usage – provide baseUrl
 const suite = new Benchmark('local');
-suite.target('helper', async () => {
-  const { helper } = await import('./helpers.js');
-  return { helper };
-});
+suite
+  .target('helper', async () => {
+    const { helper } = await import('./helpers.js');
+    return { helper };
+  })
+  .measure('use helper', ({ helper }) => helper());
 await suite.execute({ baseUrl: import.meta.url });
 ```
 
