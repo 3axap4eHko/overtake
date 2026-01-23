@@ -325,8 +325,10 @@ export const benchmark = async <TContext, TInput>({
   control[Control.INDEX] = 0;
   control[Control.PROGRESS] = 0;
   control[Control.COMPLETE] = 255;
+  control[Control.HEAP_USED] = 0;
 
   const context = (await setup?.()) as TContext;
+  const heapBefore = process.memoryUsage().heapUsed;
   const input = data as TInput;
   const maxCycles = durations.length;
   const gcWatcher = gcObserver ? new GCWatcher() : null;
@@ -376,18 +378,42 @@ export const benchmark = async <TContext, TInput>({
       : null;
 
     if (!runIsAsync && !pre && !post) {
-      const batchProbeSize = 10_000;
-      const batchProbeStart = hr();
+      const PROBE_TIME_LIMIT_NS = 1_000_000_000n;
+      const INITIAL_PROBE_SIZE = 10;
+      const MAX_PROBE_SIZE = 10_000;
+
+      const initialStart = hr();
       if (nextNonce) {
-        for (let i = 0; i < batchProbeSize; i++) {
+        for (let i = 0; i < INITIAL_PROBE_SIZE; i++) {
           consume((runRaw as Function)(context, input, nextNonce()));
         }
       } else {
-        for (let i = 0; i < batchProbeSize; i++) {
+        for (let i = 0; i < INITIAL_PROBE_SIZE; i++) {
           consume(runRaw(context, input));
         }
       }
-      durationProbe = (hr() - batchProbeStart) / BigInt(batchProbeSize);
+      const initialDuration = hr() - initialStart;
+      const estimatedPerOp = initialDuration / BigInt(INITIAL_PROBE_SIZE);
+
+      const remainingBudget = PROBE_TIME_LIMIT_NS - initialDuration;
+      const additionalIterations = estimatedPerOp > 0n ? Number(remainingBudget / estimatedPerOp) : MAX_PROBE_SIZE - INITIAL_PROBE_SIZE;
+      const cappedAdditional = Math.min(Math.max(0, additionalIterations), MAX_PROBE_SIZE - INITIAL_PROBE_SIZE);
+
+      let totalIterations = INITIAL_PROBE_SIZE;
+      if (cappedAdditional > 0) {
+        if (nextNonce) {
+          for (let i = 0; i < cappedAdditional; i++) {
+            consume((runRaw as Function)(context, input, nextNonce()));
+          }
+        } else {
+          for (let i = 0; i < cappedAdditional; i++) {
+            consume(runRaw(context, input));
+          }
+        }
+        totalIterations += cappedAdditional;
+      }
+
+      durationProbe = (hr() - initialStart) / BigInt(totalIterations);
     }
 
     const runTimedSync = runIsAsync ? null : runSync(runRaw, timerOverhead);
@@ -600,6 +626,8 @@ export const benchmark = async <TContext, TInput>({
 
     control[Control.INDEX] = i;
     control[Control.COMPLETE] = 0;
+    const heapAfter = process.memoryUsage().heapUsed;
+    control[Control.HEAP_USED] = Math.max(0, Math.round((heapAfter - heapBefore) / 1024));
   } catch (e) {
     console.error(e && typeof e === 'object' && 'stack' in e ? e.stack : e);
     control[Control.COMPLETE] = 1;

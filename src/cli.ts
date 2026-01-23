@@ -1,10 +1,22 @@
 import { createRequire, Module } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SyntheticModule, createContext, SourceTextModule } from 'node:vm';
-import { stat, readFile } from 'node:fs/promises';
+import { stat, readFile, writeFile } from 'node:fs/promises';
 import { Command, Option } from 'commander';
 import { glob } from 'glob';
-import { Benchmark, printTableReports, printJSONReports, printSimpleReports, DEFAULT_REPORT_TYPES, DEFAULT_WORKERS } from './index.js';
+import {
+  Benchmark,
+  printTableReports,
+  printJSONReports,
+  printSimpleReports,
+  printMarkdownReports,
+  printHistogramReports,
+  printComparisonReports,
+  reportsToBaseline,
+  BaselineData,
+  DEFAULT_REPORT_TYPES,
+  DEFAULT_WORKERS,
+} from './index.js';
 import { transpile } from './utils.js';
 import { REPORT_TYPES } from './types.js';
 
@@ -21,7 +33,7 @@ commander
   .argument('<paths...>', 'glob pattern to find benchmarks')
   .addOption(new Option('-r, --report-types [reportTypes...]', 'statistic types to include in the report').choices(REPORT_TYPES).default(DEFAULT_REPORT_TYPES))
   .addOption(new Option('-w, --workers [workers]', 'number of concurent workers').default(DEFAULT_WORKERS).argParser(parseInt))
-  .addOption(new Option('-f, --format [format]', 'output format').default('simple').choices(['simple', 'json', 'pjson', 'table']))
+  .addOption(new Option('-f, --format [format]', 'output format').default('simple').choices(['simple', 'json', 'pjson', 'table', 'markdown', 'histogram']))
   .addOption(new Option('--abs-threshold [absThreshold]', 'absolute error threshold in nanoseconds').argParser(parseFloat))
   .addOption(new Option('--rel-threshold [relThreshold]', 'relative error threshold (fraction between 0 and 1)').argParser(parseFloat))
   .addOption(new Option('--warmup-cycles [warmupCycles]', 'number of warmup cycles before measuring').argParser(parseInt))
@@ -29,7 +41,19 @@ commander
   .addOption(new Option('--min-cycles [minCycles]', 'minimum measurement cycles per feed').argParser(parseInt))
   .addOption(new Option('--no-gc-observer', 'disable GC overlap detection'))
   .addOption(new Option('--progress', 'show progress bar during benchmark execution'))
+  .addOption(new Option('--save-baseline <file>', 'save benchmark results to baseline file'))
+  .addOption(new Option('--compare-baseline <file>', 'compare results against baseline file'))
   .action(async (patterns: string[], executeOptions) => {
+    let baseline: BaselineData | null = null;
+    if (executeOptions.compareBaseline) {
+      try {
+        const content = await readFile(executeOptions.compareBaseline, 'utf8');
+        baseline = JSON.parse(content) as BaselineData;
+      } catch {
+        console.error(`Warning: Could not load baseline file: ${executeOptions.compareBaseline}`);
+      }
+    }
+
     const files = new Set<string>();
     await Promise.all(
       patterns.map(async (pattern) => {
@@ -101,24 +125,35 @@ commander
             ...executeOptions,
             [BENCHMARK_URL]: identifier,
           } as typeof executeOptions);
-          switch (executeOptions.format) {
-            case 'json':
-              {
+
+          if (executeOptions.saveBaseline) {
+            const baselineData = reportsToBaseline(reports);
+            await writeFile(executeOptions.saveBaseline, JSON.stringify(baselineData, null, 2));
+            console.log(`Baseline saved to: ${executeOptions.saveBaseline}`);
+          }
+
+          if (baseline) {
+            printComparisonReports(reports, baseline);
+          } else {
+            switch (executeOptions.format) {
+              case 'json':
                 printJSONReports(reports);
-              }
-              break;
-            case 'pjson':
-              {
+                break;
+              case 'pjson':
                 printJSONReports(reports, 2);
-              }
-              break;
-            case 'table':
-              {
+                break;
+              case 'table':
                 printTableReports(reports);
-              }
-              break;
-            default:
-              printSimpleReports(reports);
+                break;
+              case 'markdown':
+                printMarkdownReports(reports);
+                break;
+              case 'histogram':
+                printHistogramReports(reports);
+                break;
+              default:
+                printSimpleReports(reports);
+            }
           }
         }
       }

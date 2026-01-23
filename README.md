@@ -43,13 +43,20 @@ npx overtake benchmark.ts
 
 **The Solution**: Overtake runs every benchmark in an isolated worker thread with a fresh V8 context. No contamination. No lies.
 
-| Feature                 | Overtake                   | Benchmark.js      | Tinybench         |
-| ----------------------- | -------------------------- | ----------------- | ----------------- |
-| Worker isolation        | ✅ Each benchmark isolated | ❌ Shared context | ❌ Shared context |
-| Active maintenance      | ✅ 2025                    | ❌ Archived 2017  | ✅ 2025           |
-| Statistical convergence | ✅ Auto-adjusts cycles     | ⚠️ Manual config  | ⚠️ Manual config  |
-| Zero-copy timing        | ✅ SharedArrayBuffer       | ❌ Serialization  | ❌ Serialization  |
-| TypeScript support      | ✅ Built-in                | ❌ Manual setup   | ⚠️ Needs config   |
+| Feature                   | Overtake                     | Benchmark.js      | Tinybench         |
+| ------------------------- | ---------------------------- | ----------------- | ----------------- |
+| Worker isolation          | ✅ Each benchmark isolated   | ❌ Shared context | ❌ Shared context |
+| GC interference detection | ✅ Discards affected samples | ❌                | ❌                |
+| Outlier filtering         | ✅ IQR-based automatic       | ❌                | ❌                |
+| Adaptive batch sizing     | ✅ Auto-tuned                | ❌                | ❌                |
+| Statistical convergence   | ✅ Auto-adjusts cycles       | ⚠️ Manual config  | ⚠️ Manual config  |
+| Memory tracking           | ✅ heapUsedKB                | ❌                | ❌                |
+| DCE detection             | ✅ Warning                   | ❌                | ❌                |
+| Baseline comparison       | ✅ CLI flag                  | ❌                | ❌                |
+| Progress bar              | ✅ --progress                | ❌                | ❌                |
+| Zero-copy timing          | ✅ SharedArrayBuffer         | ❌ Serialization  | ❌ Serialization  |
+| TypeScript support        | ✅ Built-in                  | ❌ Manual setup   | ⚠️ Needs config   |
+| Active maintenance        | ✅ 2025                      | ❌ Archived 2017  | ✅ 2025           |
 
 ## Core Concepts
 
@@ -257,13 +264,20 @@ sumBenchmark.target('reduce').measure('sum', (_, numbers) => {
 npx overtake <pattern> [options]
 ```
 
-| Option           | Short | Description                              | Default   |
-| ---------------- | ----- | ---------------------------------------- | --------- |
-| `--format`       | `-f`  | Output format: `simple`, `table`, `json` | `simple`  |
-| `--report-types` | `-r`  | Stats to show: `ops`, `mean`, `p95`, etc | `['ops']` |
-| `--workers`      | `-w`  | Concurrent workers                       | CPU count |
-| `--min-cycles`   |       | Minimum iterations                       | 50        |
-| `--max-cycles`   |       | Maximum iterations                       | 1000      |
+| Option               | Short | Description                                           | Default   |
+| -------------------- | ----- | ----------------------------------------------------- | --------- |
+| `--format`           | `-f`  | Output format (see [Output Formats](#output-formats)) | `simple`  |
+| `--report-types`     | `-r`  | Stats to show (see [Metrics](#available-metrics))     | `['ops']` |
+| `--workers`          | `-w`  | Concurrent workers                                    | CPU count |
+| `--min-cycles`       |       | Minimum measurement iterations                        | 50        |
+| `--max-cycles`       |       | Maximum measurement iterations                        | 1000      |
+| `--warmup-cycles`    |       | Warmup iterations before measuring                    | 20        |
+| `--abs-threshold`    |       | Absolute error threshold (nanoseconds)                | 1000      |
+| `--rel-threshold`    |       | Relative error threshold (0-1)                        | 0.02      |
+| `--no-gc-observer`   |       | Disable GC overlap detection                          | enabled   |
+| `--progress`         |       | Show progress bar during execution                    | disabled  |
+| `--save-baseline`    |       | Save results to baseline file                         | -         |
+| `--compare-baseline` |       | Compare against baseline file                         | -         |
 
 ### Example Commands
 
@@ -276,7 +290,190 @@ npx overtake bench.ts -r ops mean p95 p99
 
 # Output JSON for CI
 npx overtake bench.ts -f json > results.json
+
+# Show progress bar for long benchmarks
+npx overtake bench.ts --progress
+
+# Markdown output for docs/PRs
+npx overtake bench.ts -f markdown
+
+# ASCII histogram chart
+npx overtake bench.ts -f histogram
 ```
+
+## Output Formats
+
+| Format      | Description                      |
+| ----------- | -------------------------------- |
+| `simple`    | Grouped console output (default) |
+| `table`     | Console table format             |
+| `json`      | Compact JSON                     |
+| `pjson`     | Pretty-printed JSON              |
+| `markdown`  | Markdown table for docs/PRs      |
+| `histogram` | ASCII bar chart comparing ops/s  |
+
+**Markdown example:**
+
+```bash
+npx overtake bench.ts -f markdown
+```
+
+```markdown
+## for loop - sum
+
+| Feed       | ops                   |
+| ---------- | --------------------- |
+| 1M numbers | 2,189 ops/s +/- 0.17% |
+```
+
+**Histogram example:**
+
+```bash
+npx overtake bench.ts -f histogram
+```
+
+```
+for loop - sum
+
+  1M numbers | ████████████████████████████████████████ 2,189 ops/s
+
+reduce - sum
+
+  1M numbers | ████ 233 ops/s
+```
+
+## Available Metrics
+
+Specify with `--report-types` or `reportTypes` option.
+
+### Core Metrics
+
+| Metric        | Description                     |
+| ------------- | ------------------------------- |
+| `ops`         | Operations per second (default) |
+| `mean`        | Average duration                |
+| `median`      | Middle value (p50)              |
+| `min` / `max` | Range bounds                    |
+| `mode`        | Most frequent duration          |
+
+### Dispersion Metrics
+
+| Metric     | Description               |
+| ---------- | ------------------------- |
+| `sd`       | Standard deviation        |
+| `variance` | Statistical variance      |
+| `sem`      | Standard error of mean    |
+| `mad`      | Median absolute deviation |
+| `iqr`      | Interquartile range       |
+
+### Confidence Metrics
+
+| Metric     | Description                  |
+| ---------- | ---------------------------- |
+| `moe`      | Margin of error (95% CI)     |
+| `rme`      | Relative margin of error (%) |
+| `ci_lower` | Lower bound of 95% CI        |
+| `ci_upper` | Upper bound of 95% CI        |
+
+### Percentiles
+
+`p1` through `p99` - any percentile
+
+**Example:**
+
+```bash
+npx overtake bench.ts -r ops mean sd rme p50 p95 p99
+```
+
+## Baseline Comparison
+
+Track performance regressions by saving and comparing baselines:
+
+```bash
+# Save current results as baseline
+npx overtake bench.ts --save-baseline baseline.json
+
+# Later, compare against baseline
+npx overtake bench.ts --compare-baseline baseline.json
+```
+
+**Output shows:**
+
+- `+` Green: Performance improved (>5% better)
+- `!` Red: Performance regressed (>5% worse)
+- No indicator: Within threshold
+
+**CI usage:**
+
+```bash
+# In CI, fail if regression detected
+npx overtake bench.ts --compare-baseline main-baseline.json
+```
+
+## Additional Output Information
+
+### Memory Tracking
+
+Each benchmark reports heap memory delta:
+
+```
+1M numbers ops: 233 ops/s +/- 0.13% (heap: 1794KB)
+```
+
+This indicates memory allocated during the benchmark run.
+
+### DCE Warning
+
+If you see `[DCE warning]`, V8 may have eliminated your benchmark code:
+
+```
+1M numbers ops: 5,000,000,000 ops/s [DCE warning]
+```
+
+**Solutions:**
+
+1. Ensure your function returns a value
+2. Use the provided input data
+3. Have observable side effects
+
+The benchmark internally uses atomic operations to prevent DCE, but extremely simple operations may still trigger this warning.
+
+## Advanced Configuration
+
+### Environment Variables
+
+| Variable                   | Description                               |
+| -------------------------- | ----------------------------------------- |
+| `OVERTAKE_PERTURB_INPUT=1` | Add nonce to inputs (defeats JIT caching) |
+
+### Node.js Flags
+
+The CLI automatically enables these flags:
+
+- `--experimental-vm-modules` - Required for worker isolation
+- `--expose-gc` - Enables explicit GC between samples
+- `--no-warnings` - Suppresses experimental warnings
+
+### Programmatic Options
+
+```typescript
+const reports = await suite.execute({
+  workers: 4, // Concurrent workers
+  warmupCycles: 20, // Warmup iterations
+  minCycles: 50, // Minimum measurement iterations
+  maxCycles: 1000, // Maximum measurement iterations
+  absThreshold: 1_000, // Stop if stddev < 1us
+  relThreshold: 0.02, // Stop if CoV < 2%
+  gcObserver: true, // Discard GC-affected samples
+  reportTypes: ['ops', 'mean', 'p95'],
+  progress: true, // Show progress bar
+  progressInterval: 100, // Progress update interval (ms)
+});
+```
+
+### One Benchmark Per File
+
+CLI mode enforces one benchmark per file. Calling `benchmark()` twice throws an error. For multiple benchmarks, use separate files or programmatic mode.
 
 ## Troubleshooting
 

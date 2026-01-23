@@ -20,7 +20,23 @@ type _Sequence<To extends number, R extends unknown[]> = R['length'] extends To 
 export type Sequence<To extends number> = number extends To ? number : _Sequence<To, []>;
 export type Between<From extends number, To extends number> = Exclude<Sequence<To>, Sequence<From>>;
 
-export type ReportType = 'ops' | 'min' | 'max' | 'mean' | 'median' | 'mode' | 'variance' | 'sd' | 'sem' | 'moe' | 'rme' | `p${Between<1, 100>}`;
+export type ReportType =
+  | 'ops'
+  | 'min'
+  | 'max'
+  | 'mean'
+  | 'median'
+  | 'mode'
+  | 'variance'
+  | 'sd'
+  | 'sem'
+  | 'moe'
+  | 'rme'
+  | 'mad'
+  | 'iqr'
+  | 'ci_lower'
+  | 'ci_upper'
+  | `p${Between<1, 100>}`;
 export type ReportTypeList = readonly ReportType[];
 export const REPORT_TYPES: ReportTypeList = Array.from({ length: 99 }, (_, idx) => `p${idx + 1}` as ReportType).concat([
   'ops',
@@ -34,6 +50,10 @@ export const REPORT_TYPES: ReportTypeList = Array.from({ length: 99 }, (_, idx) 
   'sem',
   'moe',
   'rme',
+  'mad',
+  'iqr',
+  'ci_lower',
+  'ci_upper',
 ]);
 
 export interface ReportOptions<R extends ReportTypeList> {
@@ -83,6 +103,7 @@ export enum Control {
   INDEX,
   PROGRESS,
   COMPLETE,
+  HEAP_USED,
 }
 
 export const CONTROL_SLOTS = Object.values(Control).length / 2;

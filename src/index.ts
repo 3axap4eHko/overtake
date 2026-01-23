@@ -240,10 +240,15 @@ export const printSimpleReports = <R extends ReportTypeList>(reports: TargetRepo
     for (const { measure, feeds } of report.measures) {
       console.group('\n', report.target, measure);
       for (const { feed, data } of feeds) {
-        const output = Object.entries(data)
-          .map(([key, report]) => `${key}: ${report.toString()}`)
+        const { count, heapUsedKB, dceWarning, ...metrics } = data as Record<string, unknown>;
+        const output = Object.entries(metrics)
+          .map(([key, report]) => `${key}: ${(report as { toString(): string }).toString()}`)
           .join('; ');
-        console.log(feed, output);
+        const extras: string[] = [];
+        if (heapUsedKB) extras.push(`heap: ${heapUsedKB}KB`);
+        if (dceWarning) extras.push('\x1b[33m[DCE warning]\x1b[0m');
+        const extrasStr = extras.length > 0 ? ` (${extras.join(', ')})` : '';
+        console.log(feed, output + extrasStr);
       }
       console.groupEnd();
     }
@@ -275,4 +280,119 @@ export const printJSONReports = <R extends ReportTypeList>(reports: TargetReport
     }
   }
   console.log(JSON.stringify(output, null, padding));
+};
+
+export const printMarkdownReports = <R extends ReportTypeList>(reports: TargetReport<R>[]) => {
+  for (const report of reports) {
+    for (const { measure, feeds } of report.measures) {
+      console.log(`\n## ${report.target} - ${measure}\n`);
+      if (feeds.length === 0) continue;
+
+      const keys = Object.keys(feeds[0].data).filter((k) => k !== 'count');
+      const header = ['Feed', ...keys].join(' | ');
+      const separator = ['---', ...keys.map(() => '---')].join(' | ');
+
+      console.log(`| ${header} |`);
+      console.log(`| ${separator} |`);
+
+      for (const { feed, data } of feeds) {
+        const values = keys.map((k) => (data as Record<string, { toString(): string }>)[k]?.toString() ?? '-');
+        console.log(`| ${[feed, ...values].join(' | ')} |`);
+      }
+    }
+  }
+};
+
+export const printHistogramReports = <R extends ReportTypeList>(reports: TargetReport<R>[], width = 40) => {
+  for (const report of reports) {
+    for (const { measure, feeds } of report.measures) {
+      console.log(`\n${report.target} - ${measure}\n`);
+
+      const opsKey = 'ops';
+      const values = feeds.map((f) => ({
+        feed: f.feed,
+        value: (f.data as Record<string, { valueOf(): number }>)[opsKey]?.valueOf() ?? 0,
+      }));
+
+      const maxValue = Math.max(...values.map((v) => v.value));
+      const maxLabelLen = Math.max(...values.map((v) => v.feed.length));
+
+      for (const { feed, value } of values) {
+        const barLen = maxValue > 0 ? Math.round((value / maxValue) * width) : 0;
+        const bar = '\u2588'.repeat(barLen);
+        const label = feed.padEnd(maxLabelLen);
+        const formatted = value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        console.log(`  ${label} | ${bar} ${formatted} ops/s`);
+      }
+    }
+  }
+};
+
+export interface BaselineData {
+  version: number;
+  timestamp: string;
+  results: Record<string, Record<string, number>>;
+}
+
+export const reportsToBaseline = <R extends ReportTypeList>(reports: TargetReport<R>[]): BaselineData => {
+  const results: Record<string, Record<string, number>> = {};
+  for (const report of reports) {
+    for (const { measure, feeds } of report.measures) {
+      for (const { feed, data } of feeds) {
+        const key = `${report.target}/${measure}/${feed}`;
+        results[key] = {};
+        for (const [metric, value] of Object.entries(data)) {
+          if (metric !== 'count' && typeof (value as { valueOf(): number }).valueOf === 'function') {
+            results[key][metric] = (value as { valueOf(): number }).valueOf();
+          }
+        }
+      }
+    }
+  }
+  return {
+    version: 1,
+    timestamp: new Date().toISOString(),
+    results,
+  };
+};
+
+export const printComparisonReports = <R extends ReportTypeList>(reports: TargetReport<R>[], baseline: BaselineData, threshold = 5) => {
+  for (const report of reports) {
+    for (const { measure, feeds } of report.measures) {
+      console.log(`\n${report.target} - ${measure}\n`);
+
+      for (const { feed, data } of feeds) {
+        const key = `${report.target}/${measure}/${feed}`;
+        const baselineData = baseline.results[key];
+
+        console.log(`  ${feed}:`);
+
+        for (const [metric, value] of Object.entries(data)) {
+          if (metric === 'count') continue;
+          const current = (value as { valueOf(): number }).valueOf();
+          const baselineValue = baselineData?.[metric];
+
+          if (baselineValue !== undefined && baselineValue !== 0) {
+            const change = ((current - baselineValue) / baselineValue) * 100;
+            const isOps = metric === 'ops';
+            const improved = isOps ? change > threshold : change < -threshold;
+            const regressed = isOps ? change < -threshold : change > threshold;
+
+            let indicator = ' ';
+            if (improved) indicator = '\x1b[32m+\x1b[0m';
+            else if (regressed) indicator = '\x1b[31m!\x1b[0m';
+
+            const changeStr = change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`;
+            const coloredChange = regressed ? `\x1b[31m${changeStr}\x1b[0m` : improved ? `\x1b[32m${changeStr}\x1b[0m` : changeStr;
+
+            console.log(`    ${indicator} ${metric}: ${(value as { toString(): string }).toString()} (${coloredChange})`);
+          } else {
+            console.log(`    * ${metric}: ${(value as { toString(): string }).toString()} (new)`);
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`\nBaseline from: ${baseline.timestamp}`);
 };

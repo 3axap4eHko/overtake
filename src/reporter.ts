@@ -234,6 +234,69 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
       return new Report(type, rmeScaled, 0, 100n);
     }
 
+    case 'mad': {
+      const medianIdx = Math.floor(n / 2);
+      const median = n % 2 === 1 ? durations[medianIdx] : (durations[medianIdx - 1] + durations[medianIdx]) / 2n;
+      const deviations = new BigUint64Array(n);
+      for (let i = 0; i < n; i++) {
+        const diff = durations[i] > median ? durations[i] - median : median - durations[i];
+        deviations[i] = diff;
+      }
+      deviations.sort();
+      const madIdx = Math.floor(n / 2);
+      const mad = n % 2 === 1 ? deviations[madIdx] : (deviations[madIdx - 1] + deviations[madIdx]) / 2n;
+      return new Report(type, mad, 0, DURATION_SCALE);
+    }
+
+    case 'iqr': {
+      const q1Idx = Math.floor(n * 0.25);
+      const q3Idx = Math.floor(n * 0.75);
+      const q1 = durations[q1Idx];
+      const q3 = durations[q3Idx];
+      const iqr = q3 - q1;
+      return new Report(type, iqr, 0, DURATION_SCALE);
+    }
+
+    case 'ci_lower': {
+      if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
+      let sum = 0n;
+      for (const duration of durations) {
+        sum += duration;
+      }
+      const mean = Number(sum) / n;
+      let sumSquaredDiff = 0;
+      for (const duration of durations) {
+        const diff = Number(duration) - mean;
+        sumSquaredDiff += diff * diff;
+      }
+      const variance = sumSquaredDiff / (n - 1);
+      const sd = Math.sqrt(variance);
+      const sem = sd / Math.sqrt(n);
+      const moe = Z95 * sem;
+      const ciLower = Math.max(0, mean - moe);
+      return new Report(type, BigInt(Math.round(ciLower)), 0, DURATION_SCALE);
+    }
+
+    case 'ci_upper': {
+      if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
+      let sum = 0n;
+      for (const duration of durations) {
+        sum += duration;
+      }
+      const mean = Number(sum) / n;
+      let sumSquaredDiff = 0;
+      for (const duration of durations) {
+        const diff = Number(duration) - mean;
+        sumSquaredDiff += diff * diff;
+      }
+      const variance = sumSquaredDiff / (n - 1);
+      const sd = Math.sqrt(variance);
+      const sem = sd / Math.sqrt(n);
+      const moe = Z95 * sem;
+      const ciUpper = mean + moe;
+      return new Report(type, BigInt(Math.round(ciUpper)), 0, DURATION_SCALE);
+    }
+
     default: {
       const p = Number(type.slice(1));
       if (p === 0) {

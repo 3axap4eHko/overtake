@@ -17,7 +17,11 @@ import {
   ProgressCallback,
 } from './types.js';
 
-export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report> & { count: number };
+export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report> & {
+  count: number;
+  heapUsedKB: number;
+  dceWarning: boolean;
+};
 
 export interface ExecutorOptions<R extends ReportTypeList> extends BenchmarkOptions, ReportOptions<R> {
   workers?: number;
@@ -93,9 +97,28 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     }
 
     const count = control[Control.INDEX];
+    const heapUsedKB = control[Control.HEAP_USED];
     const durations = new BigUint64Array(durationsSAB).slice(0, count).sort(cmp);
 
-    const report = reportTypes.map<[string, unknown]>((type) => [type, createReport(durations, type)] as [ReportType, Report]).concat([['count', count]]);
+    const DCE_THRESHOLD_OPS = 5_000_000_000;
+    let dceWarning = false;
+    if (count > 0) {
+      let sum = 0n;
+      for (const d of durations) sum += d;
+      const avgNs = Number(sum / BigInt(count)) / 1000;
+      const opsPerSec = avgNs > 0 ? 1_000_000_000 / avgNs : Infinity;
+      if (opsPerSec > DCE_THRESHOLD_OPS) {
+        dceWarning = true;
+      }
+    }
+
+    const report = reportTypes
+      .map<[string, unknown]>((type) => [type, createReport(durations, type)] as [ReportType, Report])
+      .concat([
+        ['count', count],
+        ['heapUsedKB', heapUsedKB],
+        ['dceWarning', dceWarning],
+      ]);
     return Object.fromEntries(report);
   }, workers);
 
