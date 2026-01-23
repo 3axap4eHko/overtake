@@ -127,16 +127,15 @@ When using `npx overtake`, a global `benchmark` function is provided:
 
 ```typescript
 // benchmark.ts - No imports needed!
-benchmark('small', () => generateSmallData())
-  .feed('large', () => generateLargeData())
-  .target('algorithm A')
-  .measure('process', (_, input) => {
-    processA(input);
-  })
-  .target('algorithm B')
-  .measure('process', (_, input) => {
-    processB(input);
-  });
+const suite = benchmark('small', () => generateSmallData()).feed('large', () => generateLargeData());
+
+suite.target('algorithm A').measure('process', (_, input) => {
+  processA(input);
+});
+
+suite.target('algorithm B').measure('process', (_, input) => {
+  processB(input);
+});
 ```
 
 ```bash
@@ -171,20 +170,31 @@ printTableReports(reports);
 
 ```typescript
 // Create with initial feed
-benchmark('initial data', () => data)
-  .feed('more data', () => moreData) // Add more datasets
+const suite = benchmark('initial data', () => data).feed('more data', () => moreData); // Add more datasets
 
-  // Define what to compare
-  .target('implementation A')
-  .measure('operation', (ctx, input) => {
-    /* ... */
-  })
+// Define what to compare
+suite.target('implementation A').measure('operation', (ctx, input) => {
+  /* ... */
+});
 
-  .target('implementation B')
-  .measure('operation', (ctx, input) => {
-    /* ... */
-  });
+suite.target('implementation B').measure('operation', (ctx, input) => {
+  /* ... */
+});
 ```
+
+### Method Chaining Reference
+
+```
+benchmark(name, feedFn) -> Benchmark
+  .feed(name, feedFn)   -> Benchmark
+  .target(name, setup?) -> Target
+    .teardown(fn)       -> Target
+    .measure(name, fn)  -> Measure
+      .pre(fn)          -> Measure
+      .post(fn)         -> Measure
+```
+
+Note: `.measure()` returns `Measure`, not `Benchmark`. To add multiple targets, call `suite.target()` separately for each.
 
 ### Targets with Setup
 
@@ -243,12 +253,18 @@ sumBenchmark.target('reduce').measure('sum', (_, numbers) => {
 
 ```typescript
 // examples/imports.ts - Correct way to import local files
-.target('local files', async () => {
-  const { join } = await import('node:path');
-  const modulePath = join(process.cwd(), './build/myModule.js');
-  const { myFunction } = await import(modulePath);
-  return { myFunction };
-})
+const suite = benchmark('local modules', () => testData);
+
+suite
+  .target('local files', async () => {
+    const { join } = await import('node:path');
+    const modulePath = join(process.cwd(), './build/myModule.js');
+    const { myFunction } = await import(modulePath);
+    return { myFunction };
+  })
+  .measure('call function', ({ myFunction }, input) => {
+    myFunction(input);
+  });
 ```
 
 **[📁 See all examples](./examples/):**
