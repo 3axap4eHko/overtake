@@ -76,13 +76,14 @@ commander
           instance = Benchmark.create(...args);
           return instance;
         };
+        const globals = Object.create(null);
+        for (const k of Object.getOwnPropertyNames(globalThis)) {
+          globals[k] = (globalThis as any)[k];
+        }
+        globals.benchmark = benchmark;
         const script = new SourceTextModule(code, {
           identifier,
-          context: createContext({
-            benchmark,
-            Buffer,
-            console,
-          }),
+          context: createContext(globals),
           initializeImportMeta(meta) {
             meta.url = identifier;
           },

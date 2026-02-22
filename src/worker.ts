@@ -52,7 +52,11 @@ export const run = ${serialize(runCode)};
 export const post = ${serialize(postCode)};
   `;
 
-const context = createContext({ console, Buffer });
+const globals = Object.create(null);
+for (const k of Object.getOwnPropertyNames(globalThis)) {
+  globals[k] = (globalThis as any)[k];
+}
+const context = createContext(globals);
 const imports = new Map<string, SyntheticModule>();
 
 const createSyntheticModule = (moduleExports: unknown, exportNames: string[], identifier: string) => {
