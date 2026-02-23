@@ -9,7 +9,7 @@ export default {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {
-    '\\.js$': '@swc/jest',
+    '\\.[jt]s$': '@swc/jest',
   },
   testMatch: ['**/__tests__/**/*.js'],
 };

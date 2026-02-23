@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { queue } from 'async';
 import { pathToFileURL } from 'node:url';
 import { createReport, Report } from './reporter.js';
-import { cmp } from './utils.js';
+import { cmp, assertNoClosure } from './utils.js';
 import {
   ExecutorRunOptions,
   ReportOptions,
@@ -43,6 +43,12 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     const preCode = pre?.toString();
     const runCode = run.toString()!;
     const postCode = post?.toString();
+
+    if (setupCode) assertNoClosure(setupCode, 'setup');
+    if (teardownCode) assertNoClosure(teardownCode, 'teardown');
+    if (preCode) assertNoClosure(preCode, 'pre');
+    assertNoClosure(runCode, 'run');
+    if (postCode) assertNoClosure(postCode, 'post');
 
     const controlSAB = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * CONTROL_SLOTS);
     const durationsSAB = new SharedArrayBuffer(BigUint64Array.BYTES_PER_ELEMENT * maxCycles);

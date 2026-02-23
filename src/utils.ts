@@ -1,4 +1,4 @@
-import { transform } from '@swc/core';
+import { transform, parseSync } from '@swc/core';
 
 export const abs = (value: bigint) => {
   if (value < 0n) {
@@ -64,6 +64,49 @@ export class ScaledBigInt {
   number() {
     return Number(div(this.value, this.scale));
   }
+}
+
+const KNOWN_GLOBALS = new Set(Object.getOwnPropertyNames(globalThis));
+KNOWN_GLOBALS.add('arguments');
+
+function collectUnresolved(node: unknown, result: Set<string>) {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectUnresolved(item, result);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  if (obj.type === 'Identifier' && obj.ctxt === 1 && typeof obj.value === 'string') {
+    result.add(obj.value);
+  }
+  for (const key of Object.keys(obj)) {
+    if (key === 'span') continue;
+    collectUnresolved(obj[key], result);
+  }
+}
+
+export function assertNoClosure(code: string, name: string): void {
+  let ast;
+  try {
+    ast = parseSync(`var __fn = ${code}`, { syntax: 'ecmascript', target: 'esnext' });
+  } catch {
+    return;
+  }
+  const unresolved = new Set<string>();
+  collectUnresolved(ast, unresolved);
+  for (const g of KNOWN_GLOBALS) unresolved.delete(g);
+  if (unresolved.size === 0) return;
+
+  const vars = [...unresolved].join(', ');
+  throw new Error(
+    `Benchmark "${name}" function references outer-scope variables: ${vars}\n\n` +
+      `Benchmark functions are serialized with .toString() and executed in an isolated\n` +
+      `worker thread. Closed-over variables from the original module scope are not\n` +
+      `available in the worker and will cause a ReferenceError at runtime.\n\n` +
+      `To fix this, move the referenced values into:\n` +
+      `  - "setup" function (returned value becomes the first argument of run/pre/post)\n` +
+      `  - "data" option (passed as the second argument of run/pre/post)`,
+  );
 }
 
 export const transpile = async (code: string): Promise<string> => {
