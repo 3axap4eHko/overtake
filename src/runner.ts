@@ -7,7 +7,7 @@ const COMPLETE_VALUE = 100_00;
 
 const hr = process.hrtime.bigint.bind(process.hrtime);
 
-const sink = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+const sink = new Int32Array(1);
 const consume = (value: unknown) => {
   let payload = 0;
   switch (typeof value) {
@@ -32,7 +32,7 @@ const consume = (value: unknown) => {
     default:
       payload = -1;
   }
-  Atomics.xor(sink, 0, payload);
+  sink[0] ^= payload;
 };
 
 const runSync = (run: Function, overhead: bigint) => {

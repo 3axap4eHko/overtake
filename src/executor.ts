@@ -21,6 +21,7 @@ export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report>
   count: number;
   heapUsedKB: number;
   dceWarning: boolean;
+  error?: string;
 };
 
 export interface ExecutorOptions<R extends ReportTypeList> extends BenchmarkOptions, ReportOptions<R> {
@@ -89,17 +90,18 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     const WORKER_TIMEOUT_MS = 300_000;
     const exitPromise = once(worker, 'exit');
     const timeoutId = setTimeout(() => worker.terminate(), WORKER_TIMEOUT_MS);
+    let workerError: string | undefined;
     try {
       const [exitCode] = await exitPromise;
       clearTimeout(timeoutId);
       if (progressIntervalId) clearInterval(progressIntervalId);
       if (exitCode !== 0) {
-        throw new Error(`worker exited with code ${exitCode}`);
+        workerError = `worker exited with code ${exitCode}`;
       }
     } catch (err) {
       clearTimeout(timeoutId);
       if (progressIntervalId) clearInterval(progressIntervalId);
-      throw err;
+      workerError = err instanceof Error ? err.message : String(err);
     }
 
     const count = control[Control.INDEX];
@@ -124,13 +126,10 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
         ['count', count],
         ['heapUsedKB', heapUsedKB],
         ['dceWarning', dceWarning],
+        ['error', workerError],
       ]);
     return Object.fromEntries(report);
   }, workers);
-
-  executor.error((err) => {
-    console.error(err);
-  });
 
   return executor;
 };

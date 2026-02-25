@@ -240,7 +240,11 @@ export const printSimpleReports = <R extends ReportTypeList>(reports: TargetRepo
     for (const { measure, feeds } of report.measures) {
       console.group('\n', report.target, measure);
       for (const { feed, data } of feeds) {
-        const { count, heapUsedKB, dceWarning, ...metrics } = data as Record<string, unknown>;
+        const { count, heapUsedKB, dceWarning, error: benchError, ...metrics } = data as Record<string, unknown>;
+        if (benchError) {
+          console.log(feed, `\x1b[31m[error: ${benchError}]\x1b[0m`);
+          continue;
+        }
         const output = Object.entries(metrics)
           .map(([key, report]) => `${key}: ${(report as { toString(): string }).toString()}`)
           .join('; ');
@@ -261,7 +265,12 @@ export const printTableReports = <R extends ReportTypeList>(reports: TargetRepor
       console.log('\n', report.target, measure);
       const table: Record<string, unknown> = {};
       for (const { feed, data } of feeds) {
-        table[feed] = Object.fromEntries(Object.entries(data).map(([key, report]) => [key, report.toString()]));
+        const { error: benchError } = data as Record<string, unknown>;
+        if (benchError) {
+          table[feed] = { error: benchError };
+        } else {
+          table[feed] = Object.fromEntries(Object.entries(data).map(([key, report]) => [key, report.toString()]));
+        }
       }
       console.table(table);
     }
@@ -274,7 +283,12 @@ export const printJSONReports = <R extends ReportTypeList>(reports: TargetReport
     for (const { measure, feeds } of report.measures) {
       const row = {} as Record<string, Record<string, string>>;
       for (const { feed, data } of feeds) {
-        row[feed] = Object.fromEntries(Object.entries(data).map(([key, report]) => [key, report.toString()]));
+        const { error: benchError } = data as Record<string, unknown>;
+        if (benchError) {
+          row[feed] = { error: String(benchError) };
+        } else {
+          row[feed] = Object.fromEntries(Object.entries(data).map(([key, report]) => [key, report.toString()]));
+        }
       }
       output[`${report.target} ${measure}`] = row;
     }
@@ -288,7 +302,14 @@ export const printMarkdownReports = <R extends ReportTypeList>(reports: TargetRe
       console.log(`\n## ${report.target} - ${measure}\n`);
       if (feeds.length === 0) continue;
 
-      const keys = Object.keys(feeds[0].data).filter((k) => k !== 'count');
+      const firstValid = feeds.find((f) => !(f.data as Record<string, unknown>).error);
+      if (!firstValid) {
+        for (const { feed, data } of feeds) {
+          console.log(`| ${feed} | error: ${(data as Record<string, unknown>).error} |`);
+        }
+        continue;
+      }
+      const keys = Object.keys(firstValid.data).filter((k) => k !== 'count' && k !== 'error');
       const header = ['Feed', ...keys].join(' | ');
       const separator = ['---', ...keys.map(() => '---')].join(' | ');
 
@@ -296,6 +317,10 @@ export const printMarkdownReports = <R extends ReportTypeList>(reports: TargetRe
       console.log(`| ${separator} |`);
 
       for (const { feed, data } of feeds) {
+        if ((data as Record<string, unknown>).error) {
+          console.log(`| ${feed} | error: ${(data as Record<string, unknown>).error} |`);
+          continue;
+        }
         const values = keys.map((k) => (data as Record<string, { toString(): string }>)[k]?.toString() ?? '-');
         console.log(`| ${[feed, ...values].join(' | ')} |`);
       }
@@ -309,18 +334,26 @@ export const printHistogramReports = <R extends ReportTypeList>(reports: TargetR
       console.log(`\n${report.target} - ${measure}\n`);
 
       const opsKey = 'ops';
-      const values = feeds.map((f) => ({
-        feed: f.feed,
-        value: (f.data as Record<string, { valueOf(): number }>)[opsKey]?.valueOf() ?? 0,
-      }));
+      const values = feeds.map((f) => {
+        const { error: benchError } = f.data as Record<string, unknown>;
+        return {
+          feed: f.feed,
+          value: benchError ? 0 : ((f.data as Record<string, { valueOf(): number }>)[opsKey]?.valueOf() ?? 0),
+          error: benchError as string | undefined,
+        };
+      });
 
       const maxValue = Math.max(...values.map((v) => v.value));
       const maxLabelLen = Math.max(...values.map((v) => v.feed.length));
 
-      for (const { feed, value } of values) {
+      for (const { feed, value, error } of values) {
+        const label = feed.padEnd(maxLabelLen);
+        if (error) {
+          console.log(`  ${label} | \x1b[31m[error: ${error}]\x1b[0m`);
+          continue;
+        }
         const barLen = maxValue > 0 ? Math.round((value / maxValue) * width) : 0;
         const bar = '\u2588'.repeat(barLen);
-        const label = feed.padEnd(maxLabelLen);
         const formatted = value.toLocaleString('en-US', { maximumFractionDigits: 2 });
         console.log(`  ${label} | ${bar} ${formatted} ops/s`);
       }
@@ -339,6 +372,7 @@ export const reportsToBaseline = <R extends ReportTypeList>(reports: TargetRepor
   for (const report of reports) {
     for (const { measure, feeds } of report.measures) {
       for (const { feed, data } of feeds) {
+        if ((data as Record<string, unknown>).error) continue;
         const key = `${report.target}/${measure}/${feed}`;
         results[key] = {};
         for (const [metric, value] of Object.entries(data)) {
@@ -366,6 +400,11 @@ export const printComparisonReports = <R extends ReportTypeList>(reports: Target
         const baselineData = baseline.results[key];
 
         console.log(`  ${feed}:`);
+
+        if ((data as Record<string, unknown>).error) {
+          console.log(`    \x1b[31m[error: ${(data as Record<string, unknown>).error}]\x1b[0m`);
+          continue;
+        }
 
         for (const [metric, value] of Object.entries(data)) {
           if (metric === 'count') continue;

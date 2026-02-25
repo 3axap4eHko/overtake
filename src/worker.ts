@@ -1,5 +1,5 @@
 import { workerData } from 'node:worker_threads';
-import { SourceTextModule, SyntheticModule, createContext } from 'node:vm';
+import { SourceTextModule, SyntheticModule } from 'node:vm';
 import { createRequire } from 'node:module';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -41,7 +41,11 @@ const resolveSpecifier = (specifier: string) => {
   if (isAbsolute(specifier)) {
     return pathToFileURL(specifier).href;
   }
-  return requireFrom.resolve(specifier);
+  try {
+    return requireFrom.resolve(specifier);
+  } catch {
+    return specifier;
+  }
 };
 
 const source = `
@@ -52,11 +56,6 @@ export const run = ${serialize(runCode)};
 export const post = ${serialize(postCode)};
   `;
 
-const globals = Object.create(null);
-for (const k of Object.getOwnPropertyNames(globalThis)) {
-  globals[k] = (globalThis as any)[k];
-}
-const context = createContext(globals);
 const imports = new Map<string, SyntheticModule>();
 
 const createSyntheticModule = (moduleExports: unknown, exportNames: string[], identifier: string) => {
@@ -71,7 +70,7 @@ const createSyntheticModule = (moduleExports: unknown, exportNames: string[], id
         mod.setExport(name, (moduleExports as Record<string, unknown>)[name]);
       }
     },
-    { identifier, context },
+    { identifier },
   );
   return mod;
 };
@@ -111,7 +110,6 @@ const loadDynamicModule = async (target: string) => {
 };
 const mod = new SourceTextModule(source, {
   identifier: resolvedBenchmarkUrl,
-  context,
   initializeImportMeta(meta) {
     meta.url = resolvedBenchmarkUrl;
   },

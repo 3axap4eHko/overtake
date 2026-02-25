@@ -503,6 +503,14 @@ CLI mode enforces one benchmark per file. Calling `benchmark()` twice throws an 
 
 **Solution**: In CLI mode, don't import Benchmark or call `.execute()`. Use the global `benchmark` function.
 
+### Worker out of memory
+
+Benchmarks that retain objects across iterations (e.g. pushing to an array to prevent GC) can exhaust the worker heap. Increase the heap limit via `NODE_OPTIONS`:
+
+```bash
+NODE_OPTIONS='--max-old-space-size=8192' npx overtake bench.ts
+```
+
 ### Results vary between runs
 
 **Solution**: Increase `--min-cycles` for more samples, or use the `gcBlock` pattern to prevent garbage collection.
