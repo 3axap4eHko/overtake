@@ -7,7 +7,7 @@ declare global {
   const benchmark: typeof Benchmark.create;
 }
 
-export const DEFAULT_WORKERS = cpus().length;
+export const DEFAULT_WORKERS = Math.max(1, Math.ceil(cpus().length / 4));
 
 export const AsyncFunction = (async () => {}).constructor;
 const BENCHMARK_URL = Symbol.for('overtake.benchmarkUrl');

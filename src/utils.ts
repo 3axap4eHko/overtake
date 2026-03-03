@@ -1,5 +1,17 @@
 import { transform, parseSync } from '@swc/core';
 
+export const isqrt = (n: bigint): bigint => {
+  if (n < 0n) throw new RangeError('Square root of negative');
+  if (n < 2n) return n;
+  let x = n;
+  let y = (x + 1n) >> 1n;
+  while (y < x) {
+    x = y;
+    y = (x + n / x) >> 1n;
+  }
+  return x;
+};
+
 export const abs = (value: bigint) => {
   if (value < 0n) {
     return -value;

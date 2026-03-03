@@ -107,7 +107,7 @@ export enum Control {
 }
 
 export const CONTROL_SLOTS = Object.values(Control).length / 2;
-export const DEFAULT_CYCLES = 1_000;
+export const DEFAULT_CYCLES = 10_000;
 export const Z95 = 1.96;
 export const DURATION_SCALE = 1000n;
 export const COMPLETE_VALUE = 100_00;

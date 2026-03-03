@@ -1,5 +1,5 @@
-import { div, max, divs } from './utils.js';
-import { ReportType, DURATION_SCALE, Z95 } from './types.js';
+import { div, max, divs, isqrt } from './utils.js';
+import { ReportType, DURATION_SCALE } from './types.js';
 
 const units = [
   { unit: 'ns', factor: 1 },
@@ -70,6 +70,24 @@ export class Report {
   }
 }
 
+const SQRT_SCALE = 1_000_000n;
+const SQRT_SCALE_SQ = SQRT_SCALE * SQRT_SCALE;
+const Z95_NUM = 196n;
+const Z95_DENOM = 100n;
+
+const computeStats = (durations: BigUint64Array) => {
+  let sum = 0n;
+  for (const d of durations) sum += d;
+  const n = BigInt(durations.length);
+  const mean = sum / n;
+  let ssd = 0n;
+  for (const d of durations) {
+    const diff = d - mean;
+    ssd += diff * diff;
+  }
+  return { sum, mean, ssd, n };
+};
+
 export const createReport = (durations: BigUint64Array, type: ReportType): Report => {
   const n = durations.length;
   if (n === 0) {
@@ -112,11 +130,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
     }
 
     case 'ops': {
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const avgScaled = sum / BigInt(n);
+      const { mean: avgScaled, ssd, n: nBig } = computeStats(durations);
       const nsPerSecScaled = 1_000_000_000n * DURATION_SCALE;
       const raw = Number(nsPerSecScaled) / Number(avgScaled);
       const extra = raw < 1 ? Math.ceil(-Math.log10(raw)) : 0;
@@ -126,111 +140,61 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
       const scale = 10n ** BigInt(exp);
 
       const value = avgScaled > 0n ? (nsPerSecScaled * scale) / avgScaled : 0n;
-      const deviation = durations[n - 1] - durations[0];
-      const uncertainty = avgScaled > 0 ? Number(div(deviation * scale, 2n * avgScaled)) : 0;
+      let uncertainty = 0;
+      if (n >= 2 && avgScaled > 0n) {
+        const RME_PRECISION = 1_000_000n;
+        const semOverMeanSqScaled = (ssd * RME_PRECISION * RME_PRECISION) / (BigInt(n - 1) * nBig * avgScaled * avgScaled);
+        const semOverMeanScaled = isqrt(semOverMeanSqScaled);
+        uncertainty = Number(Z95_NUM * semOverMeanScaled) / Number(RME_PRECISION);
+      }
       return new Report(type, value, uncertainty, scale);
     }
     case 'mean': {
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
+      const { sum } = computeStats(durations);
       const value = divs(sum, BigInt(n), 1n);
       return new Report(type, value, 0, DURATION_SCALE);
     }
 
     case 'variance': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE * DURATION_SCALE);
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const mean = sum / BigInt(n);
-      let sumSquaredDiff = 0n;
-      for (const duration of durations) {
-        const diff = duration - mean;
-        sumSquaredDiff += diff * diff;
-      }
-      const variance = sumSquaredDiff / BigInt(n - 1);
+      const { ssd } = computeStats(durations);
+      const variance = ssd / BigInt(n - 1);
       return new Report(type, variance, 0, DURATION_SCALE * DURATION_SCALE);
     }
 
     case 'sd': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const mean = sum / BigInt(n);
-      let sumSquaredDiff = 0n;
-      for (const duration of durations) {
-        const diff = duration - mean;
-        sumSquaredDiff += diff * diff;
-      }
-      const variance = Number(sumSquaredDiff) / (n - 1);
-      const sd = Math.sqrt(variance);
-      const sdScaled = BigInt(Math.round(sd));
-      return new Report(type, sdScaled, 0, DURATION_SCALE);
+      const { ssd } = computeStats(durations);
+      const scaledVariance = (ssd * SQRT_SCALE_SQ) / BigInt(n - 1);
+      const sdScaled = isqrt(scaledVariance);
+      return new Report(type, sdScaled, 0, DURATION_SCALE * SQRT_SCALE);
     }
 
     case 'sem': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const mean = sum / BigInt(n);
-      let sumSquaredDiff = 0n;
-      for (const duration of durations) {
-        const diff = duration - mean;
-        sumSquaredDiff += diff * diff;
-      }
-      const variance = Number(sumSquaredDiff) / (n - 1);
-      const sd = Math.sqrt(variance);
-      const sem = sd / Math.sqrt(n);
-      const semScaled = BigInt(Math.round(sem));
-      return new Report(type, semScaled, 0, DURATION_SCALE);
+      const { ssd, n: nBig } = computeStats(durations);
+      const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
+      const semScaled = isqrt(semSqScaled);
+      return new Report(type, semScaled, 0, DURATION_SCALE * SQRT_SCALE);
     }
 
     case 'moe': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const mean = sum / BigInt(n);
-      let sumSquaredDiff = 0n;
-      for (const duration of durations) {
-        const diff = duration - mean;
-        sumSquaredDiff += diff * diff;
-      }
-      const variance = Number(sumSquaredDiff) / (n - 1);
-      const sd = Math.sqrt(variance);
-      const sem = sd / Math.sqrt(n);
-      const moe = Z95 * sem;
-      const moeScaled = BigInt(Math.round(moe));
-      return new Report(type, moeScaled, 0, DURATION_SCALE);
+      const { ssd, n: nBig } = computeStats(durations);
+      const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
+      const semScaled = isqrt(semSqScaled);
+      const moeScaled = (Z95_NUM * semScaled) / Z95_DENOM;
+      return new Report(type, moeScaled, 0, DURATION_SCALE * SQRT_SCALE);
     }
 
     case 'rme': {
       if (n < 2) return new Report(type, 0n);
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const mean = Number(sum) / n;
-      if (mean === 0) return new Report(type, 0n);
-      let sumSquaredDiff = 0;
-      for (const duration of durations) {
-        const diff = Number(duration) - mean;
-        sumSquaredDiff += diff * diff;
-      }
-      const variance = sumSquaredDiff / (n - 1);
-      const sd = Math.sqrt(variance);
-      const sem = sd / Math.sqrt(n);
-      const moe = Z95 * sem;
-      const rme = (moe / mean) * 100;
-      const rmeScaled = BigInt(Math.round(rme * 100));
+      const { mean, ssd, n: nBig } = computeStats(durations);
+      if (mean === 0n) return new Report(type, 0n);
+      const RME_PRECISION = 1_000_000n;
+      const semOverMeanSqScaled = (ssd * RME_PRECISION * RME_PRECISION) / (BigInt(n - 1) * nBig * mean * mean);
+      const semOverMeanScaled = isqrt(semOverMeanSqScaled);
+      const rmeScaled = (Z95_NUM * semOverMeanScaled * 100n) / RME_PRECISION;
       return new Report(type, rmeScaled, 0, 100n);
     }
 
@@ -259,42 +223,22 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
 
     case 'ci_lower': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const mean = Number(sum) / n;
-      let sumSquaredDiff = 0;
-      for (const duration of durations) {
-        const diff = Number(duration) - mean;
-        sumSquaredDiff += diff * diff;
-      }
-      const variance = sumSquaredDiff / (n - 1);
-      const sd = Math.sqrt(variance);
-      const sem = sd / Math.sqrt(n);
-      const moe = Z95 * sem;
-      const ciLower = Math.max(0, mean - moe);
-      return new Report(type, BigInt(Math.round(ciLower)), 0, DURATION_SCALE);
+      const { mean, ssd, n: nBig } = computeStats(durations);
+      const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
+      const semScaled = isqrt(semSqScaled);
+      const moeScaled = (Z95_NUM * semScaled) / Z95_DENOM;
+      const ciLowerScaled = mean * SQRT_SCALE - moeScaled;
+      return new Report(type, ciLowerScaled > 0n ? ciLowerScaled : 0n, 0, DURATION_SCALE * SQRT_SCALE);
     }
 
     case 'ci_upper': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      let sum = 0n;
-      for (const duration of durations) {
-        sum += duration;
-      }
-      const mean = Number(sum) / n;
-      let sumSquaredDiff = 0;
-      for (const duration of durations) {
-        const diff = Number(duration) - mean;
-        sumSquaredDiff += diff * diff;
-      }
-      const variance = sumSquaredDiff / (n - 1);
-      const sd = Math.sqrt(variance);
-      const sem = sd / Math.sqrt(n);
-      const moe = Z95 * sem;
-      const ciUpper = mean + moe;
-      return new Report(type, BigInt(Math.round(ciUpper)), 0, DURATION_SCALE);
+      const { mean, ssd, n: nBig } = computeStats(durations);
+      const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
+      const semScaled = isqrt(semSqScaled);
+      const moeScaled = (Z95_NUM * semScaled) / Z95_DENOM;
+      const ciUpperScaled = mean * SQRT_SCALE + moeScaled;
+      return new Report(type, ciUpperScaled, 0, DURATION_SCALE * SQRT_SCALE);
     }
 
     default: {

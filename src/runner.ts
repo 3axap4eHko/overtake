@@ -518,12 +518,22 @@ export const benchmark = async <TContext, TInput>({
     }
 
     let i = 0;
-    let mean = 0n;
-    let m2 = 0n;
+    const WELFORD_SCALE = 1_000_000n;
+    let meanS = 0n;
+    let m2S = 0n;
     const outlierWindow: number[] = [];
     let skipped = 0;
     const maxSkipped = maxCycles * 10;
     let disableFiltering = false;
+
+    const absThScaled = BigInt(Math.round(absThreshold)) * WELFORD_SCALE;
+    const absThSq = absThScaled * absThScaled;
+    const REL_PRECISION = 1_000_000n;
+    const relThBigint = BigInt(Math.round(relThreshold * Number(REL_PRECISION)));
+    const relThSq = relThBigint * relThBigint;
+    const relPrecSq = REL_PRECISION * REL_PRECISION;
+    const Z95_SQ_NUM = 38416n;
+    const Z95_SQ_DENOM = 10000n;
 
     while (true) {
       if (i >= maxCycles) break;
@@ -583,26 +593,28 @@ export const benchmark = async <TContext, TInput>({
       }
 
       const durationNumber = Number(sampleDuration);
-      pushWindow(outlierWindow, durationNumber, OUTLIER_WINDOW);
       if (!disableFiltering) {
         const { median, iqr } = medianAndIqr(outlierWindow);
+        pushWindow(outlierWindow, durationNumber, OUTLIER_WINDOW);
         const maxAllowed = median + OUTLIER_IQR_MULTIPLIER * iqr || Number.POSITIVE_INFINITY;
         if (outlierWindow.length >= 8 && durationNumber > maxAllowed && durationNumber - median > OUTLIER_ABS_THRESHOLD) {
           skipped++;
           continue;
         }
 
-        const meanNumber = Number(mean);
+        const meanNumber = Number(meanS / WELFORD_SCALE);
         if (i >= 8 && meanNumber > 0 && durationNumber > OUTLIER_MULTIPLIER * meanNumber && durationNumber - meanNumber > OUTLIER_ABS_THRESHOLD) {
           skipped++;
           continue;
         }
+      } else {
+        pushWindow(outlierWindow, durationNumber, OUTLIER_WINDOW);
       }
 
       durations[i++] = sampleDuration;
-      const delta = sampleDuration - mean;
-      mean += delta / BigInt(i);
-      m2 += delta * (sampleDuration - mean);
+      const deltaS = sampleDuration * WELFORD_SCALE - meanS;
+      meanS += deltaS / BigInt(i);
+      m2S += deltaS * (sampleDuration * WELFORD_SCALE - meanS);
 
       const progress = (i / maxCycles) * COMPLETE_VALUE;
       if (i % PROGRESS_STRIDE === 0) {
@@ -610,17 +622,11 @@ export const benchmark = async <TContext, TInput>({
       }
 
       if (i >= minCycles) {
-        const variance = Number(m2) / (i - 1);
-        const stddev = Math.sqrt(variance);
-        if (stddev <= Number(absThreshold)) {
-          break;
-        }
-
-        const meanNum = Number(mean);
-        const cov = stddev / (meanNum || 1);
-        if (cov <= relThreshold) {
-          break;
-        }
+        if (m2S <= absThSq * BigInt(i - 1)) break;
+        // RME convergence: Z95 * sem/mean <= relThreshold
+        // Z95^2 * m2S / (n*(n-1)*meanS^2) <= relThreshold^2
+        const ni = BigInt(i);
+        if (meanS !== 0n && Z95_SQ_NUM * m2S * relPrecSq <= relThSq * ni * (ni - 1n) * meanS * meanS * Z95_SQ_DENOM) break;
       }
     }
 
