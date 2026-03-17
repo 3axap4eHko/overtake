@@ -1,9 +1,6 @@
 import { performance, PerformanceObserver } from 'node:perf_hooks';
-import { Options, Control, DURATION_SCALE } from './types.js';
-import { GCWatcher } from './gc-watcher.js';
-import { StepFn } from './types.js';
-
-const COMPLETE_VALUE = 100_00;
+import { type Options, Control, DURATION_SCALE, COMPLETE_VALUE, type StepFn } from './types.ts';
+import { GCWatcher } from './gc-watcher.ts';
 
 const hr = process.hrtime.bigint.bind(process.hrtime);
 

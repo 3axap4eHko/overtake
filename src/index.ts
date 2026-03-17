@@ -1,7 +1,7 @@
 import { cpus } from 'node:os';
 import Progress from 'progress';
-import { createExecutor, ExecutorOptions, ExecutorReport } from './executor.js';
-import { MaybePromise, StepFn, SetupFn, TeardownFn, FeedFn, ReportType, ReportTypeList, DEFAULT_CYCLES, ProgressInfo } from './types.js';
+import { createExecutor, type ExecutorOptions, type ExecutorReport } from './executor.ts';
+import { type MaybePromise, type StepFn, type SetupFn, type TeardownFn, type FeedFn, type ReportType, type ReportTypeList, DEFAULT_CYCLES, type ProgressInfo } from './types.ts';
 
 declare global {
   const benchmark: typeof Benchmark.create;
@@ -9,7 +9,6 @@ declare global {
 
 export const DEFAULT_WORKERS = Math.max(1, Math.ceil(cpus().length / 4));
 
-export const AsyncFunction = (async () => {}).constructor;
 const BENCHMARK_URL = Symbol.for('overtake.benchmarkUrl');
 
 export interface TargetReport<R extends ReportTypeList> {
@@ -30,14 +29,24 @@ export interface FeedReport<R extends ReportTypeList> {
 export const DEFAULT_REPORT_TYPES = ['ops'] as const;
 export type DefaultReportTypes = (typeof DEFAULT_REPORT_TYPES)[number];
 
-export class MeasureContext<TContext, TInput> {
-  public pre?: StepFn<TContext, TInput>;
-  public post?: StepFn<TContext, TInput>;
+const createExecutorErrorReport = <R extends ReportTypeList>(error: unknown): ExecutorReport<R> =>
+  ({
+    count: 0,
+    heapUsedKB: 0,
+    dceWarning: false,
+    error: error instanceof Error ? error.message : String(error),
+  }) as ExecutorReport<R>;
 
-  constructor(
-    public title: string,
-    public run: StepFn<TContext, TInput>,
-  ) {}
+export class MeasureContext<TContext, TInput> {
+  pre?: StepFn<TContext, TInput>;
+  post?: StepFn<TContext, TInput>;
+  title: string;
+  run: StepFn<TContext, TInput>;
+
+  constructor(title: string, run: StepFn<TContext, TInput>) {
+    this.title = title;
+    this.run = run;
+  }
 }
 
 export class Measure<TContext, TInput> {
@@ -58,13 +67,15 @@ export class Measure<TContext, TInput> {
 }
 
 export class TargetContext<TContext, TInput> {
-  public teardown?: TeardownFn<TContext>;
-  public measures: MeasureContext<TContext, TInput>[] = [];
+  teardown?: TeardownFn<TContext>;
+  measures: MeasureContext<TContext, TInput>[] = [];
+  readonly title: string;
+  readonly setup?: SetupFn<MaybePromise<TContext>>;
 
-  constructor(
-    readonly title: string,
-    readonly setup?: SetupFn<MaybePromise<TContext>>,
-  ) {}
+  constructor(title: string, setup?: SetupFn<MaybePromise<TContext>>) {
+    this.title = title;
+    this.setup = setup;
+  }
 }
 
 export class Target<TContext, TInput> {
@@ -87,10 +98,13 @@ export class Target<TContext, TInput> {
 }
 
 export class FeedContext<TInput> {
-  constructor(
-    readonly title: string,
-    readonly fn?: FeedFn<TInput>,
-  ) {}
+  readonly title: string;
+  readonly fn?: FeedFn<TInput>;
+
+  constructor(title: string, fn?: FeedFn<TInput>) {
+    this.title = title;
+    this.fn = fn;
+  }
 }
 
 export class Benchmark<TInput> {
@@ -136,7 +150,7 @@ export class Benchmark<TInput> {
     return new Target<TContext, TInput>(target);
   }
 
-  async execute<R extends readonly ReportType[] = typeof DEFAULT_REPORT_TYPES>(options: ExecutorOptions<R> & { progress?: boolean }): Promise<TargetReport<R>[]> {
+  async execute<R extends readonly ReportType[] = typeof DEFAULT_REPORT_TYPES>(options: Partial<ExecutorOptions<R>> & { progress?: boolean } = {}): Promise<TargetReport<R>[]> {
     const {
       workers = DEFAULT_WORKERS,
       warmupCycles = 20,
@@ -193,45 +207,59 @@ export class Benchmark<TInput> {
     } as Required<ExecutorOptions<R>>);
 
     const reports: TargetReport<R>[] = [];
-    for (const target of this.#targets) {
-      const targetReport: TargetReport<R> = { target: target.title, measures: [] };
-      for (const measure of target.measures) {
-        const measureReport: MeasureReport<R> = { measure: measure.title, feeds: [] };
-        for (const feed of this.#feeds) {
-          const id = `${target.title}/${measure.title}/${feed.title}`;
-          const data = await feed.fn?.();
-          executor
-            .push<ExecutorReport<R>>({
-              id,
-              setup: target.setup,
-              teardown: target.teardown,
-              pre: measure.pre,
-              run: measure.run,
-              post: measure.post,
-              data,
-            })
-            .then((data) => {
-              progressMap.delete(id);
-              completedBenchmarks++;
-              measureReport.feeds.push({
-                feed: feed.title,
-                data,
-              });
-            });
+    const pendingReports: Promise<void>[] = [];
+
+    try {
+      const feedData = await Promise.all(this.#feeds.map(async (feed) => ({ title: feed.title, data: await feed.fn?.() })));
+      for (const target of this.#targets) {
+        const targetReport: TargetReport<R> = { target: target.title, measures: [] };
+        for (const measure of target.measures) {
+          const measureReport: MeasureReport<R> = { measure: measure.title, feeds: [] };
+          for (const feed of feedData) {
+            const id = `${target.title}/${measure.title}/${feed.title}`;
+            const feedReport: FeedReport<R> = {
+              feed: feed.title,
+              data: createExecutorErrorReport<R>('Benchmark did not produce a report'),
+            };
+
+            measureReport.feeds.push(feedReport);
+            pendingReports.push(
+              (async () => {
+                try {
+                  feedReport.data = await executor.pushAsync<ExecutorReport<R>>({
+                    id,
+                    setup: target.setup,
+                    teardown: target.teardown,
+                    pre: measure.pre,
+                    run: measure.run,
+                    post: measure.post,
+                    data: feed.data,
+                  });
+                } catch (error) {
+                  feedReport.data = createExecutorErrorReport<R>(error);
+                } finally {
+                  progressMap.delete(id);
+                  completedBenchmarks++;
+                }
+              })(),
+            );
+          }
+          targetReport.measures.push(measureReport);
         }
-        targetReport.measures.push(measureReport);
+        reports.push(targetReport);
       }
-      reports.push(targetReport);
-    }
-    await executor.drain();
-    executor.kill();
 
-    if (bar) {
-      bar.update(1, { label: 'done' });
-      bar.terminate();
-    }
+      await Promise.all(pendingReports);
 
-    return reports;
+      if (bar) {
+        bar.update(1, { label: 'done' });
+        bar.terminate();
+      }
+
+      return reports;
+    } finally {
+      executor.kill();
+    }
   }
 }
 

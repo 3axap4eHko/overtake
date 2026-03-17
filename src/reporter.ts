@@ -1,5 +1,5 @@
-import { div, max, divs, isqrt } from './utils.js';
-import { ReportType, DURATION_SCALE } from './types.js';
+import { div, max, divs, isqrt } from './utils.ts';
+import { type ReportType, DURATION_SCALE } from './types.ts';
 
 const units = [
   { unit: 'ns', factor: 1 },
@@ -18,12 +18,17 @@ function smartFixed(n: number): string {
   });
 }
 export class Report {
-  constructor(
-    public readonly type: ReportType,
-    public readonly value: bigint,
-    public readonly uncertainty: number = 0,
-    public readonly scale: bigint = 1n,
-  ) {}
+  readonly type: ReportType;
+  readonly value: bigint;
+  readonly uncertainty: number;
+  readonly scale: bigint;
+
+  constructor(type: ReportType, value: bigint, uncertainty: number = 0, scale: bigint = 1n) {
+    this.type = type;
+    this.value = value;
+    this.uncertainty = uncertainty;
+    this.scale = scale;
+  }
   valueOf() {
     return Number(div(this.value, this.scale));
   }
@@ -75,7 +80,9 @@ const SQRT_SCALE_SQ = SQRT_SCALE * SQRT_SCALE;
 const Z95_NUM = 196n;
 const Z95_DENOM = 100n;
 
-const computeStats = (durations: BigUint64Array) => {
+type Stats = { sum: bigint; mean: bigint; ssd: bigint; n: bigint };
+
+export const computeStats = (durations: BigUint64Array): Stats => {
   let sum = 0n;
   for (const d of durations) sum += d;
   const n = BigInt(durations.length);
@@ -88,11 +95,12 @@ const computeStats = (durations: BigUint64Array) => {
   return { sum, mean, ssd, n };
 };
 
-export const createReport = (durations: BigUint64Array, type: ReportType): Report => {
+export const createReport = (durations: BigUint64Array, type: ReportType, stats?: Stats): Report => {
   const n = durations.length;
   if (n === 0) {
     return new Report(type, 0n);
   }
+  const st = stats ?? computeStats(durations);
   switch (type) {
     case 'min': {
       return new Report(type, durations[0], 0, DURATION_SCALE);
@@ -130,7 +138,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
     }
 
     case 'ops': {
-      const { mean: avgScaled, ssd, n: nBig } = computeStats(durations);
+      const { mean: avgScaled, ssd, n: nBig } = st;
       const nsPerSecScaled = 1_000_000_000n * DURATION_SCALE;
       const raw = Number(nsPerSecScaled) / Number(avgScaled);
       const extra = raw < 1 ? Math.ceil(-Math.log10(raw)) : 0;
@@ -150,21 +158,21 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
       return new Report(type, value, uncertainty, scale);
     }
     case 'mean': {
-      const { sum } = computeStats(durations);
+      const { sum } = st;
       const value = divs(sum, BigInt(n), 1n);
       return new Report(type, value, 0, DURATION_SCALE);
     }
 
     case 'variance': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE * DURATION_SCALE);
-      const { ssd } = computeStats(durations);
+      const { ssd } = st;
       const variance = ssd / BigInt(n - 1);
       return new Report(type, variance, 0, DURATION_SCALE * DURATION_SCALE);
     }
 
     case 'sd': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      const { ssd } = computeStats(durations);
+      const { ssd } = st;
       const scaledVariance = (ssd * SQRT_SCALE_SQ) / BigInt(n - 1);
       const sdScaled = isqrt(scaledVariance);
       return new Report(type, sdScaled, 0, DURATION_SCALE * SQRT_SCALE);
@@ -172,7 +180,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
 
     case 'sem': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      const { ssd, n: nBig } = computeStats(durations);
+      const { ssd, n: nBig } = st;
       const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
       const semScaled = isqrt(semSqScaled);
       return new Report(type, semScaled, 0, DURATION_SCALE * SQRT_SCALE);
@@ -180,7 +188,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
 
     case 'moe': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      const { ssd, n: nBig } = computeStats(durations);
+      const { ssd, n: nBig } = st;
       const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
       const semScaled = isqrt(semSqScaled);
       const moeScaled = (Z95_NUM * semScaled) / Z95_DENOM;
@@ -189,7 +197,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
 
     case 'rme': {
       if (n < 2) return new Report(type, 0n);
-      const { mean, ssd, n: nBig } = computeStats(durations);
+      const { mean, ssd, n: nBig } = st;
       if (mean === 0n) return new Report(type, 0n);
       const RME_PRECISION = 1_000_000n;
       const semOverMeanSqScaled = (ssd * RME_PRECISION * RME_PRECISION) / (BigInt(n - 1) * nBig * mean * mean);
@@ -223,7 +231,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
 
     case 'ci_lower': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      const { mean, ssd, n: nBig } = computeStats(durations);
+      const { mean, ssd, n: nBig } = st;
       const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
       const semScaled = isqrt(semSqScaled);
       const moeScaled = (Z95_NUM * semScaled) / Z95_DENOM;
@@ -233,7 +241,7 @@ export const createReport = (durations: BigUint64Array, type: ReportType): Repor
 
     case 'ci_upper': {
       if (n < 2) return new Report(type, 0n, 0, DURATION_SCALE);
-      const { mean, ssd, n: nBig } = computeStats(durations);
+      const { mean, ssd, n: nBig } = st;
       const semSqScaled = (ssd * SQRT_SCALE_SQ) / (BigInt(n - 1) * nBig);
       const semScaled = isqrt(semSqScaled);
       const moeScaled = (Z95_NUM * semScaled) / Z95_DENOM;

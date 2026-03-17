@@ -99,14 +99,14 @@ export interface Options<TContext, TInput> extends RunOptions<TContext, TInput>,
   controlSAB: SharedArrayBuffer;
 }
 
-export enum Control {
-  INDEX,
-  PROGRESS,
-  COMPLETE,
-  HEAP_USED,
-}
+export const Control = {
+  INDEX: 0,
+  PROGRESS: 1,
+  COMPLETE: 2,
+  HEAP_USED: 3,
+} as const;
 
-export const CONTROL_SLOTS = Object.values(Control).length / 2;
+export const CONTROL_SLOTS = Object.keys(Control).length;
 export const DEFAULT_CYCLES = 10_000;
 export const Z95 = 1.96;
 export const DURATION_SCALE = 1000n;

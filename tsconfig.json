@@ -8,10 +8,12 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
     "lib": ["ESNext"],
     "rootDir": "src",
     "outDir": "build"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "**/*.tmp.ts"]
+  "exclude": ["node_modules", "**/__tests__", "**/*.tmp.ts"]
 }

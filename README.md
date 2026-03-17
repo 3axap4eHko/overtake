@@ -98,8 +98,7 @@ benchmark('data', getData)
 
 ### Importing Local Files
 
-- **CLI mode (`npx overtake`)**: `baseUrl` is set to the benchmark file, so `await import('./helper.js')` works.
-- **Programmatic mode (`suite.execute`)**: pass `baseUrl: import.meta.url` (the benchmark’s file URL) so relative imports resolve correctly. If you omit it, Overtake falls back to `process.cwd()` and relative imports may fail.
+- **CLI mode (`npx overtake`)**: relative imports resolve from the benchmark file automatically.
 
 ```typescript
 // CLI usage – relative path is fine
@@ -109,16 +108,6 @@ benchmark('local', () => 1)
     return { helper };
   })
   .measure('use helper', ({ helper }) => helper());
-
-// Programmatic usage – provide baseUrl
-const suite = new Benchmark('local');
-suite
-  .target('helper', async () => {
-    const { helper } = await import('./helpers.js');
-    return { helper };
-  })
-  .measure('use helper', ({ helper }) => helper());
-await suite.execute({ baseUrl: import.meta.url });
 ```
 
 ## Usage
@@ -285,7 +274,7 @@ npx overtake <pattern> [options]
 | Option               | Short | Description                                           | Default   |
 | -------------------- | ----- | ----------------------------------------------------- | --------- |
 | `--format`           | `-f`  | Output format (see [Output Formats](#output-formats)) | `simple`  |
-| `--report-types`     | `-r`  | Stats to show (see [Metrics](#available-metrics))     | `['ops']` |
+| `--report-types`     | `-r`  | Stats to show, repeat for multiple (`-r ops -r p99`)  | `['ops']` |
 | `--workers`          | `-w`  | Concurrent workers                                    | CPU count |
 | `--min-cycles`       |       | Minimum measurement iterations                        | 50        |
 | `--max-cycles`       |       | Maximum measurement iterations                        | 1000      |
@@ -304,7 +293,7 @@ npx overtake <pattern> [options]
 npx overtake "**/*.bench.ts" -f table
 
 # Show detailed statistics
-npx overtake bench.ts -r ops mean p95 p99
+npx overtake bench.ts -r ops -r mean -r p95 -r p99
 
 # Output JSON for CI
 npx overtake bench.ts -f json > results.json
@@ -400,7 +389,7 @@ Specify with `--report-types` or `reportTypes` option.
 **Example:**
 
 ```bash
-npx overtake bench.ts -r ops mean sd rme p50 p95 p99
+npx overtake bench.ts -r ops -r mean -r sd -r rme -r p50 -r p95 -r p99
 ```
 
 ## Baseline Comparison

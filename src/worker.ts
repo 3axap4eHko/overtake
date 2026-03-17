@@ -1,10 +1,13 @@
 import { workerData } from 'node:worker_threads';
 import { SourceTextModule, SyntheticModule } from 'node:vm';
-import { createRequire } from 'node:module';
+import { createRequire, register } from 'node:module';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { benchmark } from './runner.js';
-import { WorkerOptions } from './types.js';
+import { benchmark } from './runner.ts';
+import { type WorkerOptions } from './types.ts';
+import { resolveHookUrl } from './utils.ts';
+
+register(resolveHookUrl);
 
 const {
   benchmarkUrl,

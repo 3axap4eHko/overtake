@@ -1,21 +1,20 @@
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
-import { queue } from 'async';
 import { pathToFileURL } from 'node:url';
-import { createReport, Report } from './reporter.js';
-import { cmp, assertNoClosure } from './utils.js';
+import { createReport, computeStats, Report } from './reporter.ts';
+import { cmp, assertNoClosure } from './utils.ts';
 import {
-  ExecutorRunOptions,
-  ReportOptions,
-  WorkerOptions,
-  BenchmarkOptions,
+  type ExecutorRunOptions,
+  type ReportOptions,
+  type WorkerOptions,
+  type BenchmarkOptions,
   Control,
-  ReportType,
-  ReportTypeList,
+  type ReportType,
+  type ReportTypeList,
   CONTROL_SLOTS,
   COMPLETE_VALUE,
-  ProgressCallback,
-} from './types.js';
+  type ProgressCallback,
+} from './types.ts';
 
 export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report> & {
   count: number;
@@ -33,16 +32,46 @@ export interface ExecutorOptions<R extends ReportTypeList> extends BenchmarkOpti
 
 const BENCHMARK_URL = Symbol.for('overtake.benchmarkUrl');
 
-export const createExecutor = <TContext, TInput, R extends ReportTypeList>(options: Required<ExecutorOptions<R>>) => {
+export interface Executor<TContext, TInput> {
+  pushAsync<T>(task: ExecutorRunOptions<TContext, TInput>): Promise<T>;
+  kill(): void;
+}
+
+export const createExecutor = <TContext, TInput, R extends ReportTypeList>(options: Required<ExecutorOptions<R>>): Executor<TContext, TInput> => {
   const { workers, warmupCycles, maxCycles, minCycles, absThreshold, relThreshold, gcObserver = true, reportTypes, onProgress, progressInterval = 100 } = options;
   const benchmarkUrl = (options as Record<symbol, unknown>)[BENCHMARK_URL];
   const resolvedBenchmarkUrl = typeof benchmarkUrl === 'string' ? benchmarkUrl : pathToFileURL(process.cwd()).href;
 
-  const executor = queue<ExecutorRunOptions<TContext, TInput>>(async ({ id, setup, teardown, pre, run, post, data }) => {
+  const pending: { task: ExecutorRunOptions<TContext, TInput>; resolve: (v: unknown) => void; reject: (e: unknown) => void }[] = [];
+  let running = 0;
+
+  const schedule = async (task: ExecutorRunOptions<TContext, TInput>) => {
+    running++;
+    try {
+      return await runTask(task);
+    } finally {
+      running--;
+      if (pending.length > 0) {
+        const next = pending.shift()!;
+        schedule(next.task).then(next.resolve, next.reject);
+      }
+    }
+  };
+
+  const pushAsync = <T>(task: ExecutorRunOptions<TContext, TInput>): Promise<T> => {
+    if (running < workers) {
+      return schedule(task) as Promise<T>;
+    }
+    return new Promise<T>((resolve, reject) => {
+      pending.push({ task, resolve: resolve as (v: unknown) => void, reject });
+    });
+  };
+
+  const runTask = async ({ id, setup, teardown, pre, run, post, data }: ExecutorRunOptions<TContext, TInput>) => {
     const setupCode = setup?.toString();
     const teardownCode = teardown?.toString();
     const preCode = pre?.toString();
-    const runCode = run.toString()!;
+    const runCode = run.toString();
     const postCode = post?.toString();
 
     if (setupCode) assertNoClosure(setupCode, 'setup');
@@ -54,7 +83,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     const controlSAB = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * CONTROL_SLOTS);
     const durationsSAB = new SharedArrayBuffer(BigUint64Array.BYTES_PER_ELEMENT * maxCycles);
 
-    const workerFile = new URL('./worker.js', import.meta.url);
+    const workerFile = new URL('./worker.ts', import.meta.url);
     const workerData: WorkerOptions = {
       benchmarkUrl: resolvedBenchmarkUrl,
       setupCode,
@@ -120,8 +149,9 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
       }
     }
 
+    const stats = count > 0 ? computeStats(durations) : undefined;
     const report = reportTypes
-      .map<[string, unknown]>((type) => [type, createReport(durations, type)] as [ReportType, Report])
+      .map<[string, unknown]>((type) => [type, createReport(durations, type, stats)] as [ReportType, Report])
       .concat([
         ['count', count],
         ['heapUsedKB', heapUsedKB],
@@ -129,7 +159,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
         ['error', workerError],
       ]);
     return Object.fromEntries(report);
-  }, workers);
+  };
 
-  return executor;
+  return { pushAsync, kill() {} };
 };

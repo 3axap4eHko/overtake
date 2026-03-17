@@ -1,4 +1,18 @@
-import { transform, parseSync } from '@swc/core';
+import { parseSync } from '@swc/core';
+
+async function resolve(s: string, c: unknown, n: (...args: unknown[]) => unknown) {
+  try {
+    return await n(s, c);
+  } catch (e) {
+    if (s.endsWith('.js'))
+      try {
+        return await n(s.slice(0, -3) + '.ts', c);
+      } catch {}
+    throw e;
+  }
+}
+
+export const resolveHookUrl = 'data:text/javascript,' + encodeURIComponent(`export ${resolve.toString()}`);
 
 export const isqrt = (n: bigint): bigint => {
   if (n < 0n) throw new RangeError('Square root of negative');
@@ -12,12 +26,6 @@ export const isqrt = (n: bigint): bigint => {
   return x;
 };
 
-export const abs = (value: bigint) => {
-  if (value < 0n) {
-    return -value;
-  }
-  return value;
-};
 export const cmp = (a: bigint | number, b: bigint | number): number => {
   if (a > b) {
     return 1;
@@ -35,10 +43,6 @@ export const max = (a: bigint, b: bigint) => {
   return b;
 };
 
-export const divMod = (a: bigint, b: bigint) => {
-  return { quotient: a / b, remainder: a % b };
-};
-
 export function div(a: bigint, b: bigint, decimals: number = 2): string {
   if (b === 0n) throw new RangeError('Division by zero');
   const scale = 10n ** BigInt(decimals);
@@ -51,31 +55,6 @@ export function div(a: bigint, b: bigint, decimals: number = 2): string {
 export function divs(a: bigint, b: bigint, scale: bigint): bigint {
   if (b === 0n) throw new RangeError('Division by zero');
   return (a * scale) / b;
-}
-
-export class ScaledBigInt {
-  constructor(
-    public value: bigint,
-    public scale: bigint,
-  ) {}
-  add(value: bigint) {
-    this.value += value * this.scale;
-  }
-  sub(value: bigint) {
-    this.value -= value * this.scale;
-  }
-  div(value: bigint) {
-    this.value /= value;
-  }
-  mul(value: bigint) {
-    this.value *= value;
-  }
-  unscale() {
-    return this.value / this.scale;
-  }
-  number() {
-    return Number(div(this.value, this.scale));
-  }
 }
 
 const KNOWN_GLOBALS = new Set(Object.getOwnPropertyNames(globalThis));
@@ -120,21 +99,3 @@ export function assertNoClosure(code: string, name: string): void {
       `  - "data" option (passed as the second argument of run/pre/post)`,
   );
 }
-
-export const transpile = async (code: string): Promise<string> => {
-  const output = await transform(code, {
-    filename: 'benchmark.ts',
-    jsc: {
-      parser: {
-        syntax: 'typescript',
-        tsx: false,
-        dynamicImport: true,
-      },
-      target: 'esnext',
-    },
-    module: {
-      type: 'es6',
-    },
-  });
-  return output.code;
-};
