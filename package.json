@@ -6,16 +6,16 @@
   "types": "build/index.d.ts",
   "exports": {
     "types": "./build/index.d.ts",
-    "import": "./src/index.ts"
+    "import": "./build/index.js"
   },
   "bin": {
     "overtake": "bin/overtake.js"
   },
   "scripts": {
-    "build": "rm -rf build && tsc --declaration --emitDeclarationOnly",
+    "build": "rm -rf build && tsc",
     "start": "./bin/overtake.js",
-    "test": "node --experimental-test-module-mocks --test src/__tests__/*.ts",
-    "test:cov": "node --experimental-test-module-mocks --experimental-test-coverage --test src/__tests__/*.ts",
+    "test": "node --experimental-test-module-mocks --import ./src/register-hook.ts --test src/__tests__/*.ts",
+    "test:cov": "node --experimental-test-module-mocks --experimental-test-coverage --import ./src/register-hook.ts --test src/__tests__/*.ts",
     "prepare": "husky"
   },
   "engines": {

@@ -3,9 +3,9 @@ import { SourceTextModule, SyntheticModule } from 'node:vm';
 import { createRequire, register } from 'node:module';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { benchmark } from './runner.ts';
-import { type WorkerOptions } from './types.ts';
-import { resolveHookUrl } from './utils.ts';
+import { benchmark } from './runner.js';
+import { type WorkerOptions } from './types.js';
+import { resolveHookUrl } from './utils.js';
 
 register(resolveHookUrl);
 

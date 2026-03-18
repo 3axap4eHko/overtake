@@ -6,13 +6,13 @@ describe('Benchmark.execute', () => {
     const pushAsync = mock.fn(() => Promise.reject(new Error('Benchmark "run" function references outer-scope variables: port')));
     const kill = mock.fn();
 
-    mock.module('../executor.ts', {
+    mock.module('../executor.js', {
       namedExports: {
         createExecutor: () => ({ pushAsync, kill }),
       },
     });
 
-    const { Benchmark } = await import('../index.ts');
+    const { Benchmark } = await import('../index.js');
 
     const bench = Benchmark.create('feed');
     bench.target('target').measure('run', () => 1);

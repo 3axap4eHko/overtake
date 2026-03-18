@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertNoClosure } from '../utils.ts';
+import { assertNoClosure } from '../utils.js';
 
 describe('assertNoClosure', () => {
   describe('allows functions without closures', () => {

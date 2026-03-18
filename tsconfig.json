@@ -8,7 +8,6 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "moduleResolution": "NodeNext",
-    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "lib": ["ESNext"],
     "rootDir": "src",

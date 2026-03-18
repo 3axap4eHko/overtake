@@ -1,5 +1,5 @@
-import { div, max, divs, isqrt } from './utils.ts';
-import { type ReportType, DURATION_SCALE } from './types.ts';
+import { div, max, divs, isqrt } from './utils.js';
+import { type ReportType, DURATION_SCALE } from './types.js';
 
 const units = [
   { unit: 'ns', factor: 1 },

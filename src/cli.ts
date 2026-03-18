@@ -14,9 +14,9 @@ import {
   type BaselineData,
   DEFAULT_REPORT_TYPES,
   DEFAULT_WORKERS,
-} from './index.ts';
-import { REPORT_TYPES } from './types.ts';
-import { resolveHookUrl } from './utils.ts';
+} from './index.js';
+import { REPORT_TYPES } from './types.js';
+import { resolveHookUrl } from './utils.js';
 
 register(resolveHookUrl);
 

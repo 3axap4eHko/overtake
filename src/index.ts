@@ -1,7 +1,7 @@
 import { cpus } from 'node:os';
 import Progress from 'progress';
-import { createExecutor, type ExecutorOptions, type ExecutorReport } from './executor.ts';
-import { type MaybePromise, type StepFn, type SetupFn, type TeardownFn, type FeedFn, type ReportType, type ReportTypeList, DEFAULT_CYCLES, type ProgressInfo } from './types.ts';
+import { createExecutor, type ExecutorOptions, type ExecutorReport } from './executor.js';
+import { type MaybePromise, type StepFn, type SetupFn, type TeardownFn, type FeedFn, type ReportType, type ReportTypeList, DEFAULT_CYCLES, type ProgressInfo } from './types.js';
 
 declare global {
   const benchmark: typeof Benchmark.create;

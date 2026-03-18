@@ -1,8 +1,8 @@
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
-import { createReport, computeStats, Report } from './reporter.ts';
-import { cmp, assertNoClosure } from './utils.ts';
+import { createReport, computeStats, Report } from './reporter.js';
+import { cmp, assertNoClosure } from './utils.js';
 import {
   type ExecutorRunOptions,
   type ReportOptions,
@@ -14,7 +14,7 @@ import {
   CONTROL_SLOTS,
   COMPLETE_VALUE,
   type ProgressCallback,
-} from './types.ts';
+} from './types.js';
 
 export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report> & {
   count: number;
@@ -83,7 +83,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     const controlSAB = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * CONTROL_SLOTS);
     const durationsSAB = new SharedArrayBuffer(BigUint64Array.BYTES_PER_ELEMENT * maxCycles);
 
-    const workerFile = new URL('./worker.ts', import.meta.url);
+    const workerFile = new URL('./worker.js', import.meta.url);
     const workerData: WorkerOptions = {
       benchmarkUrl: resolvedBenchmarkUrl,
       setupCode,
