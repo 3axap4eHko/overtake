@@ -1,6 +1,6 @@
 {
   "name": "overtake",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "NodeJS performance benchmark",
   "type": "module",
   "types": "build/index.d.ts",
