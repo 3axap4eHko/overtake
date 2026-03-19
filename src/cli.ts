@@ -105,6 +105,8 @@ if (opts['compare-baseline']) {
 
 const files = new Set((await Promise.all(patterns.map((pattern) => Array.fromAsync(glob(pattern, { cwd: process.cwd() })).catch(() => [] as string[])))).flat());
 
+const allBaselineResults: Record<string, Record<string, number>> = {};
+
 for (const file of files) {
   const stats = await stat(file).catch(() => false as const);
   if (stats && stats.isFile()) {
@@ -117,18 +119,28 @@ for (const file of files) {
       instance = Benchmark.create(...args);
       return instance;
     };
-    await import(identifier);
+    try {
+      await import(identifier);
+    } catch (e) {
+      console.error(`Error loading ${file}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
 
     if (instance) {
-      const reports = await instance.execute({
-        ...executeOptions,
-        [BENCHMARK_URL]: identifier,
-      } as typeof executeOptions);
+      let reports;
+      try {
+        reports = await instance.execute({
+          ...executeOptions,
+          [BENCHMARK_URL]: identifier,
+        } as typeof executeOptions);
+      } catch (e) {
+        console.error(`Error executing ${file}: ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
 
       if (opts['save-baseline']) {
-        const baselineData = reportsToBaseline(reports);
-        await writeFile(opts['save-baseline'], JSON.stringify(baselineData, null, 2));
-        console.log(`Baseline saved to: ${opts['save-baseline']}`);
+        const bd = reportsToBaseline(reports);
+        Object.assign(allBaselineResults, bd.results);
       }
 
       if (baseline) {
@@ -156,4 +168,14 @@ for (const file of files) {
       }
     }
   }
+}
+
+if (opts['save-baseline'] && Object.keys(allBaselineResults).length > 0) {
+  const baselineData: BaselineData = {
+    version: 1,
+    timestamp: new Date().toISOString(),
+    results: allBaselineResults,
+  };
+  await writeFile(opts['save-baseline'], JSON.stringify(baselineData, null, 2));
+  console.log(`Baseline saved to: ${opts['save-baseline']}`);
 }

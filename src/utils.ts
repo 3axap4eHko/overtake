@@ -45,11 +45,14 @@ export const max = (a: bigint, b: bigint) => {
 
 export function div(a: bigint, b: bigint, decimals: number = 2): string {
   if (b === 0n) throw new RangeError('Division by zero');
+  const neg = a < 0n !== b < 0n;
+  const absA = a < 0n ? -a : a;
+  const absB = b < 0n ? -b : b;
   const scale = 10n ** BigInt(decimals);
-  const scaled = (a * scale) / b;
+  const scaled = (absA * scale) / absB;
   const intPart = scaled / scale;
   const fracPart = scaled % scale;
-  return `${intPart}.${fracPart.toString().padStart(decimals, '0')}`;
+  return `${neg ? '-' : ''}${intPart}.${fracPart.toString().padStart(decimals, '0')}`;
 }
 
 export function divs(a: bigint, b: bigint, scale: bigint): bigint {
@@ -60,19 +63,68 @@ export function divs(a: bigint, b: bigint, scale: bigint): bigint {
 const KNOWN_GLOBALS = new Set(Object.getOwnPropertyNames(globalThis));
 KNOWN_GLOBALS.add('arguments');
 
-function collectUnresolved(node: unknown, result: Set<string>) {
+let _unresolvedCtxt: number | undefined;
+
+function findIdentifierCtxt(node: unknown, name: string): number | undefined {
+  if (!node || typeof node !== 'object') return undefined;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const r = findIdentifierCtxt(item, name);
+      if (r !== undefined) return r;
+    }
+    return undefined;
+  }
+  const obj = node as Record<string, unknown>;
+  if (obj.type === 'Identifier' && obj.value === name && typeof obj.ctxt === 'number') {
+    return obj.ctxt;
+  }
+  for (const key of Object.keys(obj)) {
+    if (key === 'span') continue;
+    const r = findIdentifierCtxt(obj[key], name);
+    if (r !== undefined) return r;
+  }
+  return undefined;
+}
+
+function probeUnresolvedCtxt(): number {
+  if (_unresolvedCtxt !== undefined) return _unresolvedCtxt;
+  try {
+    const ast = parseSync('var _ = () => __PROBE__', { syntax: 'ecmascript', target: 'esnext' });
+    _unresolvedCtxt = findIdentifierCtxt(ast, '__PROBE__') ?? 1;
+  } catch {
+    _unresolvedCtxt = 1;
+  }
+  return _unresolvedCtxt;
+}
+
+function collectUnresolved(node: unknown, ctxt: number, result: Set<string>) {
   if (!node || typeof node !== 'object') return;
   if (Array.isArray(node)) {
-    for (const item of node) collectUnresolved(item, result);
+    for (const item of node) collectUnresolved(item, ctxt, result);
     return;
   }
   const obj = node as Record<string, unknown>;
-  if (obj.type === 'Identifier' && obj.ctxt === 1 && typeof obj.value === 'string') {
+  if (obj.type === 'Identifier' && obj.ctxt === ctxt && typeof obj.value === 'string') {
     result.add(obj.value);
   }
   for (const key of Object.keys(obj)) {
     if (key === 'span') continue;
-    collectUnresolved(obj[key], result);
+    collectUnresolved(obj[key], ctxt, result);
+  }
+}
+
+export function normalizeFunction(code: string): string {
+  try {
+    parseSync(`var __fn = ${code}`, { syntax: 'ecmascript', target: 'esnext' });
+    return code;
+  } catch {
+    const normalized = code.startsWith('async ') ? `async function ${code.slice(6)}` : `function ${code}`;
+    try {
+      parseSync(`var __fn = ${normalized}`, { syntax: 'ecmascript', target: 'esnext' });
+      return normalized;
+    } catch {
+      return code;
+    }
   }
 }
 
@@ -83,8 +135,9 @@ export function assertNoClosure(code: string, name: string): void {
   } catch {
     return;
   }
+  const unresolvedCtxt = probeUnresolvedCtxt();
   const unresolved = new Set<string>();
-  collectUnresolved(ast, unresolved);
+  collectUnresolved(ast, unresolvedCtxt, unresolved);
   for (const g of KNOWN_GLOBALS) unresolved.delete(g);
   if (unresolved.size === 0) return;
 

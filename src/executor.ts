@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
 import { createReport, computeStats, Report } from './reporter.js';
-import { cmp, assertNoClosure } from './utils.js';
+import { cmp, assertNoClosure, normalizeFunction } from './utils.js';
 import {
   type ExecutorRunOptions,
   type ReportOptions,
@@ -43,6 +43,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
   const resolvedBenchmarkUrl = typeof benchmarkUrl === 'string' ? benchmarkUrl : pathToFileURL(process.cwd()).href;
 
   const pending: { task: ExecutorRunOptions<TContext, TInput>; resolve: (v: unknown) => void; reject: (e: unknown) => void }[] = [];
+  const activeWorkers = new Set<Worker>();
   let running = 0;
 
   const schedule = async (task: ExecutorRunOptions<TContext, TInput>) => {
@@ -68,11 +69,11 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
   };
 
   const runTask = async ({ id, setup, teardown, pre, run, post, data }: ExecutorRunOptions<TContext, TInput>) => {
-    const setupCode = setup?.toString();
-    const teardownCode = teardown?.toString();
-    const preCode = pre?.toString();
-    const runCode = run.toString();
-    const postCode = post?.toString();
+    const setupCode = setup ? normalizeFunction(setup.toString()) : undefined;
+    const teardownCode = teardown ? normalizeFunction(teardown.toString()) : undefined;
+    const preCode = pre ? normalizeFunction(pre.toString()) : undefined;
+    const runCode = normalizeFunction(run.toString());
+    const postCode = post ? normalizeFunction(post.toString()) : undefined;
 
     if (setupCode) assertNoClosure(setupCode, 'setup');
     if (teardownCode) assertNoClosure(teardownCode, 'teardown');
@@ -106,6 +107,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     const worker = new Worker(workerFile, {
       workerData,
     });
+    activeWorkers.add(worker);
 
     const control = new Int32Array(controlSAB);
     let progressIntervalId: ReturnType<typeof setInterval> | undefined;
@@ -132,6 +134,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
       if (progressIntervalId) clearInterval(progressIntervalId);
       workerError = err instanceof Error ? err.message : String(err);
     }
+    activeWorkers.delete(worker);
 
     const count = control[Control.INDEX];
     const heapUsedKB = control[Control.HEAP_USED];
@@ -161,5 +164,13 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     return Object.fromEntries(report);
   };
 
-  return { pushAsync, kill() {} };
+  return {
+    pushAsync,
+    kill() {
+      for (const w of activeWorkers) w.terminate();
+      activeWorkers.clear();
+      for (const p of pending) p.reject(new Error('Executor killed'));
+      pending.length = 0;
+    },
+  };
 };

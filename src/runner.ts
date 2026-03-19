@@ -592,7 +592,6 @@ export const benchmark = async <TContext, TInput>({
       const durationNumber = Number(sampleDuration);
       if (!disableFiltering) {
         const { median, iqr } = medianAndIqr(outlierWindow);
-        pushWindow(outlierWindow, durationNumber, OUTLIER_WINDOW);
         const maxAllowed = median + OUTLIER_IQR_MULTIPLIER * iqr || Number.POSITIVE_INFINITY;
         if (outlierWindow.length >= 8 && durationNumber > maxAllowed && durationNumber - median > OUTLIER_ABS_THRESHOLD) {
           skipped++;
@@ -604,9 +603,8 @@ export const benchmark = async <TContext, TInput>({
           skipped++;
           continue;
         }
-      } else {
-        pushWindow(outlierWindow, durationNumber, OUTLIER_WINDOW);
       }
+      pushWindow(outlierWindow, durationNumber, OUTLIER_WINDOW);
 
       durations[i++] = sampleDuration;
       const deltaS = sampleDuration * WELFORD_SCALE - meanS;
