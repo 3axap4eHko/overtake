@@ -1,18 +1,6 @@
 import { parseSync } from '@swc/core';
 
-async function resolve(s: string, c: unknown, n: (...args: unknown[]) => unknown) {
-  try {
-    return await n(s, c);
-  } catch (e) {
-    if (s.endsWith('.js'))
-      try {
-        return await n(s.slice(0, -3) + '.ts', c);
-      } catch {}
-    throw e;
-  }
-}
-
-export const resolveHookUrl = 'data:text/javascript,' + encodeURIComponent(`export ${resolve.toString()}`);
+export const resolveHookUrl = new URL('./loader-hook.js', import.meta.url).href;
 
 export const isqrt = (n: bigint): bigint => {
   if (n < 0n) throw new RangeError('Square root of negative');

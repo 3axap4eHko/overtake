@@ -153,15 +153,15 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     }
 
     const stats = count > 0 ? computeStats(durations) : undefined;
-    const report = reportTypes
+    const entries: [string, unknown][] = reportTypes
       .map<[string, unknown]>((type) => [type, createReport(durations, type, stats)] as [ReportType, Report])
       .concat([
         ['count', count],
         ['heapUsedKB', heapUsedKB],
         ['dceWarning', dceWarning],
-        ['error', workerError],
       ]);
-    return Object.fromEntries(report);
+    if (workerError) entries.push(['error', workerError]);
+    return Object.fromEntries(entries);
   };
 
   return {
