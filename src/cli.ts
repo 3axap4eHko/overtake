@@ -39,6 +39,7 @@ const { values: opts, positionals: patterns } = parseArgs({
     'max-cycles': { type: 'string' },
     'min-cycles': { type: 'string' },
     'no-gc-observer': { type: 'boolean' },
+    'pin-cores': { type: 'boolean' },
     progress: { type: 'boolean' },
     'save-baseline': { type: 'string' },
     'compare-baseline': { type: 'string' },
@@ -67,6 +68,7 @@ Options:
   --max-cycles <n>                maximum measurement cycles per feed
   --min-cycles <n>                minimum measurement cycles per feed
   --no-gc-observer                disable GC overlap detection
+  --pin-cores                     pin each worker to a dedicated CPU core (Linux)
   --progress                      show progress bar
   --save-baseline <file>          save results to baseline file
   --compare-baseline <file>       compare results against baseline file
@@ -89,6 +91,7 @@ const executeOptions = {
   maxCycles: opts['max-cycles'] ? parseInt(opts['max-cycles']) : undefined,
   minCycles: opts['min-cycles'] ? parseInt(opts['min-cycles']) : undefined,
   gcObserver: !opts['no-gc-observer'],
+  pinCores: opts['pin-cores'] ?? false,
   progress: opts.progress ?? false,
   format,
 };

@@ -2,6 +2,8 @@ import { workerData } from 'node:worker_threads';
 import { SourceTextModule, SyntheticModule } from 'node:vm';
 import { createRequire, register } from 'node:module';
 import { isAbsolute } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { benchmark } from './runner.js';
 import { type WorkerOptions } from './types.js';
@@ -17,6 +19,7 @@ const {
   runCode,
   postCode,
   data,
+  cpuPin,
 
   warmupCycles,
   minCycles,
@@ -27,6 +30,16 @@ const {
   durationsSAB,
   controlSAB,
 }: WorkerOptions = workerData;
+
+if (cpuPin !== undefined && process.platform === 'linux') {
+  try {
+    const status = readFileSync('/proc/thread-self/status', 'utf8');
+    const tid = status.match(/^Pid:\t(\d+)/m)?.[1];
+    if (tid) {
+      execFileSync('taskset', ['-cp', String(cpuPin), tid], { stdio: 'ignore' });
+    }
+  } catch {}
+}
 
 const serialize = (code?: string) => (code ? code : 'undefined');
 

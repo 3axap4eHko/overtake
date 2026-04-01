@@ -89,6 +89,7 @@ export interface WorkerOptions extends Required<BenchmarkOptions> {
   runCode: string;
   postCode?: string;
   data?: unknown;
+  cpuPin?: number;
 
   durationsSAB: SharedArrayBuffer;
   controlSAB: SharedArrayBuffer;

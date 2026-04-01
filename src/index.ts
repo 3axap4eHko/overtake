@@ -162,6 +162,7 @@ export class Benchmark<TInput> {
       reportTypes = DEFAULT_REPORT_TYPES as unknown as R,
       progress = false,
       progressInterval = 100,
+      pinCores = false,
     } = options;
     if (this.#executed) {
       throw new Error("Benchmark is executed and can't be reused");
@@ -201,6 +202,7 @@ export class Benchmark<TInput> {
       relThreshold,
       gcObserver,
       reportTypes,
+      pinCores,
       onProgress,
       progressInterval,
       [BENCHMARK_URL]: benchmarkUrl,

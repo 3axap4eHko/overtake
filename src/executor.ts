@@ -1,6 +1,7 @@
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
+import { cpus } from 'node:os';
 import { createReport, computeStats, Report } from './reporter.js';
 import { cmp, assertNoClosure, normalizeFunction } from './utils.js';
 import {
@@ -26,6 +27,7 @@ export type ExecutorReport<R extends ReportTypeList> = Record<R[number], Report>
 export interface ExecutorOptions<R extends ReportTypeList> extends BenchmarkOptions, ReportOptions<R> {
   workers?: number;
   maxCycles?: number;
+  pinCores?: boolean;
   onProgress?: ProgressCallback;
   progressInterval?: number;
 }
@@ -38,9 +40,16 @@ export interface Executor<TContext, TInput> {
 }
 
 export const createExecutor = <TContext, TInput, R extends ReportTypeList>(options: Required<ExecutorOptions<R>>): Executor<TContext, TInput> => {
-  const { workers, warmupCycles, maxCycles, minCycles, absThreshold, relThreshold, gcObserver = true, reportTypes, onProgress, progressInterval = 100 } = options;
+  const { workers, warmupCycles, maxCycles, minCycles, absThreshold, relThreshold, gcObserver = true, reportTypes, pinCores = false, onProgress, progressInterval = 100 } = options;
   const benchmarkUrl = (options as Record<symbol, unknown>)[BENCHMARK_URL];
   const resolvedBenchmarkUrl = typeof benchmarkUrl === 'string' ? benchmarkUrl : pathToFileURL(process.cwd()).href;
+
+  let coreList: number[] | null = null;
+  if (pinCores) {
+    const count = cpus().length;
+    coreList = count > 1 ? Array.from({ length: count - 1 }, (_, i) => i + 1) : [0];
+  }
+  let nextCoreIdx = 0;
 
   const pending: { task: ExecutorRunOptions<TContext, TInput>; resolve: (v: unknown) => void; reject: (e: unknown) => void }[] = [];
   const activeWorkers = new Set<Worker>();
@@ -84,6 +93,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
     const controlSAB = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * CONTROL_SLOTS);
     const durationsSAB = new SharedArrayBuffer(BigUint64Array.BYTES_PER_ELEMENT * maxCycles);
 
+    const cpuPin = coreList !== null ? coreList[nextCoreIdx++ % coreList.length] : undefined;
     const workerFile = new URL('./worker.js', import.meta.url);
     const workerData: WorkerOptions = {
       benchmarkUrl: resolvedBenchmarkUrl,
@@ -93,6 +103,7 @@ export const createExecutor = <TContext, TInput, R extends ReportTypeList>(optio
       runCode,
       postCode,
       data,
+      cpuPin,
 
       warmupCycles,
       minCycles,
