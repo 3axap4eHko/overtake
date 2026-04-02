@@ -394,11 +394,11 @@ export const printHistogramReports = <R extends ReportTypeList>(reports: TargetR
 export interface BaselineData {
   version: number;
   timestamp: string;
-  results: Record<string, Record<string, number>>;
+  results: Record<string, Record<string, number | boolean>>;
 }
 
 export const reportsToBaseline = <R extends ReportTypeList>(reports: TargetReport<R>[]): BaselineData => {
-  const results: Record<string, Record<string, number>> = {};
+  const results: Record<string, Record<string, number | boolean>> = {};
   for (const report of reports) {
     for (const { measure, feeds } of report.measures) {
       for (const { feed, data } of feeds) {
@@ -441,8 +441,20 @@ export const printComparisonReports = <R extends ReportTypeList>(reports: Target
           const current = (value as { valueOf(): number }).valueOf();
           const baselineValue = baselineData?.[metric];
 
+          if (typeof current === 'boolean') {
+            if (baselineValue === undefined) {
+              console.log(`    * ${metric}: ${current} (new)`);
+            } else if (current === Boolean(baselineValue)) {
+              console.log(`      ${metric}: ${current}`);
+            } else {
+              const indicator = current ? '\x1b[31m!\x1b[0m' : '\x1b[32m+\x1b[0m';
+              console.log(`    ${indicator} ${metric}: ${current} (was ${baselineValue})`);
+            }
+            continue;
+          }
+
           if (baselineValue !== undefined && baselineValue !== 0) {
-            const change = ((current - baselineValue) / baselineValue) * 100;
+            const change = ((current - (baselineValue as number)) / (baselineValue as number)) * 100;
             const isOps = metric === 'ops';
             const improved = isOps ? change > threshold : change < -threshold;
             const regressed = isOps ? change < -threshold : change > threshold;
